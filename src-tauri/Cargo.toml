@@ -1,0 +1,18 @@
+[package]
+name = "p5reader"
+version = "0.1.0"
+description = "A Persona 5 inspired EPUB, TXT, and PDF reader."
+authors = ["P5Reader"]
+edition = "2021"
+rust-version = "1.77.2"
+default-run = "p5reader"
+
+[lib]
+name = "p5reader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

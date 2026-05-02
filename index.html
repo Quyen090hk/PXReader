@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P5Reader</title>
+    <link rel="stylesheet" href="src/styles.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script defer src="src/app.js"></script>
+  </head>
+  <body data-theme="p5">
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block" aria-label="P5Reader">
+          <div class="brand-mark">P5</div>
+          <div>
+            <h1>P5Reader</h1>
+            <p>EPUB / TXT / PDF</p>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <label class="file-button" for="bookInput">
+            <input id="bookInput" type="file" accept=".epub,.txt,.pdf,application/epub+zip,text/plain,application/pdf" />
+            <span aria-hidden="true">+</span>
+            <strong>导入</strong>
+          </label>
+
+          <label class="theme-picker">
+            <span>主题</span>
+            <select id="themeSelect" aria-label="主题">
+              <option value="p5">Phantom</option>
+              <option value="light">Light</option>
+              <option value="night">Night</option>
+              <option value="sepia">Sepia</option>
+            </select>
+          </label>
+
+          <label class="theme-picker">
+            <span>版式</span>
+            <select id="layoutSelect" aria-label="版式">
+              <option value="scroll">Scroll</option>
+              <option value="paged">Paged</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="side-rail" aria-label="书库和目录">
+          <section class="panel library-panel">
+            <div class="panel-heading">
+              <h2>书库</h2>
+              <span id="libraryCount">0</span>
+            </div>
+            <div id="libraryList" class="library-list"></div>
+          </section>
+
+          <section class="panel toc-panel">
+            <div class="panel-heading">
+              <h2>目录</h2>
+              <span id="tocCount">0</span>
+            </div>
+            <nav id="tocList" class="toc-list" aria-label="目录"></nav>
+          </section>
+        </aside>
+
+        <section class="reader-shell" aria-label="阅读区">
+          <div class="reader-toolbar">
+            <div class="book-meta">
+              <strong id="bookTitle">未选择书籍</strong>
+              <span id="bookFormat">等待导入</span>
+            </div>
+
+            <div class="reader-controls" aria-label="阅读控制">
+              <button id="prevBtn" class="icon-button" type="button" aria-label="上一章或上一页" disabled>
+                <span aria-hidden="true">&#9664;</span>
+              </button>
+              <button id="nextBtn" class="icon-button" type="button" aria-label="下一章或下一页" disabled>
+                <span aria-hidden="true">&#9654;</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="progress-track" aria-label="阅读进度">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+
+          <div id="readerViewport" class="reader-viewport" tabindex="0">
+            <div class="empty-state">
+              <strong>选择一本书开始阅读</strong>
+              <span>导入 EPUB、TXT 或 PDF 后会进入统一阅读页。</span>
+            </div>
+          </div>
+
+          <footer class="reader-footer">
+            <span id="progressLabel">0%</span>
+            <span id="locationLabel">尚未打开书籍</span>
+          </footer>
+        </section>
+
+        <aside class="search-rail" aria-label="搜索">
+          <section class="panel search-panel">
+            <div class="panel-heading">
+              <h2>搜索</h2>
+              <span id="searchCount">0</span>
+            </div>
+            <form id="searchForm" class="search-box">
+              <input id="searchInput" type="search" placeholder="搜索正文" autocomplete="off" />
+              <button type="submit" aria-label="搜索">
+                <span aria-hidden="true">&#8981;</span>
+              </button>
+            </form>
+            <button id="rebuildIndexBtn" class="index-button" type="button">重建全文索引</button>
+            <div id="searchStatus" class="search-status">打开书籍后可搜索。</div>
+            <div id="searchResults" class="search-results"></div>
+          </section>
+
+          <section class="panel annotation-panel">
+            <div class="panel-heading">
+              <h2>高亮 / 笔记</h2>
+              <span id="annotationCount">0</span>
+            </div>
+            <div id="annotationList" class="annotation-list"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div id="annotationComposer" class="annotation-composer" hidden>
+      <div class="annotation-quote" id="annotationQuote"></div>
+      <div id="annotationColors" class="annotation-colors" aria-label="高亮颜色"></div>
+      <textarea id="annotationNote" rows="3" placeholder="添加笔记"></textarea>
+      <div class="annotation-actions">
+        <button id="annotationSaveHighlight" type="button">高亮</button>
+        <button id="annotationSaveNote" type="button">保存笔记</button>
+        <button id="annotationCancel" type="button">取消</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
