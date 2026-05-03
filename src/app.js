@@ -1119,11 +1119,13 @@
       article.style.removeProperty("--reader-page-height");
       article.style.removeProperty("--reader-page-gap");
       article.style.removeProperty("--reader-spread-width");
+      article.style.removeProperty("transform");
       return;
     }
 
     const metrics = calculateColumnPagedMetrics();
     state.pagedMetrics = metrics;
+    const frame = ensureEpubPageFrame(article);
     const pageWidth = metrics.pageWidth;
     const pageHeight = metrics.pageHeight;
     article.style.setProperty("--reader-page-width", `${pageWidth}px`);
@@ -1131,6 +1133,37 @@
     article.style.setProperty("--reader-page-gap", `${metrics.pageGap}px`);
     article.style.setProperty("--reader-spread-width", `${metrics.spreadWidth}px`);
     article.style.setProperty("--reader-pages-per-spread", String(metrics.pagesPerSpread));
+    frame.style.setProperty("--reader-page-width", `${pageWidth}px`);
+    frame.style.setProperty("--reader-page-height", `${pageHeight}px`);
+    frame.style.setProperty("--reader-page-gap", `${metrics.pageGap}px`);
+    frame.style.setProperty("--reader-spread-width", `${metrics.spreadWidth}px`);
+    frame.classList.toggle("is-double-page", metrics.pagesPerSpread === 2);
+    syncEpubPagerExtent(article);
+    requestAnimationFrame(() => syncEpubPagerExtent(article));
+  }
+
+  function ensureEpubPageFrame(article) {
+    if (article.parentElement?.classList.contains("epub-page-frame")) return article.parentElement;
+    const frame = document.createElement("div");
+    frame.className = "epub-page-frame";
+    article.parentNode.insertBefore(frame, article);
+    frame.append(article);
+    return frame;
+  }
+
+  function syncEpubPagerExtent(article) {
+    if (!isColumnPagedMode() || !article) return;
+    const totalWidth = Math.max(article.scrollWidth, article.offsetWidth, state.pagedMetrics.spreadWidth || 0);
+    const step = Math.max(1, state.pagedMetrics.spreadStep);
+    const rawMaxOffset = Math.max(0, totalWidth - (state.pagedMetrics.spreadWidth || 0));
+    const maxOffset = rawMaxOffset > 0 ? Math.ceil(rawMaxOffset / step) * step : 0;
+    state.pagedMetrics = {
+      ...state.pagedMetrics,
+      totalWidth,
+      maxOffset,
+      maxSpreadIndex: maxOffset > 0 ? Math.ceil(maxOffset / step) : 0,
+    };
+    applyEpubPageOffset(false);
   }
 
   function calculateColumnPagedMetrics() {
@@ -1145,6 +1178,18 @@
     const spreadWidth = pageWidth * pagesPerSpread + pageGap * (pagesPerSpread - 1);
     const spreadStep = pagesPerSpread * (pageWidth + pageGap);
     return { pagesPerSpread, pageWidth, pageHeight, pageGap, spreadWidth, spreadStep };
+  }
+
+  function applyEpubPageOffset(animated) {
+    const article = els.readerViewport.querySelector(".book-content.is-paginated");
+    if (!article) return;
+    const maxOffset = state.pagedMetrics.maxOffset || 0;
+    const offset = maxOffset > 0 ? clamp((state.location?.ratio || 0) * maxOffset, 0, maxOffset) : 0;
+    article.classList.toggle("is-turning", Boolean(animated));
+    article.style.transform = `translateX(${-Math.round(offset)}px)`;
+    if (animated) {
+      window.setTimeout(() => article.classList.remove("is-turning"), 260);
+    }
   }
 
   function decorateCurrentContent() {
@@ -1175,8 +1220,7 @@
 
       const ratio = clamp(state.location.ratio || 0, 0, 1);
       if (isColumnPagedMode()) {
-        const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
-        els.readerViewport.scrollLeft = max > 0 ? max * ratio : 0;
+        applyEpubPageOffset(false);
       } else if (state.location.unit === "chapter") {
         const max = els.readerViewport.scrollHeight - els.readerViewport.clientHeight;
         els.readerViewport.scrollTop = max > 0 ? max * ratio : 0;
@@ -1328,14 +1372,14 @@
     if (!state.adapter || !state.location) return;
     if (await turnPdfSpread(direction)) return;
     if (turnPaged(direction)) return;
-    startPageTurn(direction);
+    queuePageTurn(direction);
     const nextLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
     await navigateTo(nextLocation);
   }
 
   async function turnPdfSpread(direction) {
     if (!isPdfPagedMode() || !state.location || state.location.unit !== "page") return false;
-    const step = getPdfPagesPerSpread();
+    const step = 1;
     const current = state.location.page || 1;
     if (direction === "next" && current + step > state.adapter.pageCount) return true;
     if (direction === "prev" && current <= 1) return true;
@@ -1344,7 +1388,7 @@
         ? Math.min(state.adapter.pageCount, current + step)
         : Math.max(1, current - step);
     if (target === current) return false;
-    startPageTurn(direction);
+    queuePageTurn(direction);
     await navigateTo({ unit: "page", page: target });
     return true;
   }
@@ -1352,31 +1396,34 @@
   function turnPaged(direction) {
     if (!isColumnPagedMode() || !state.location || state.location.unit !== "chapter") return false;
 
-    const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
+    const max = state.pagedMetrics.maxOffset || 0;
     if (max <= 0) return false;
 
     const page = Math.max(240, state.pagedMetrics.spreadStep || els.readerViewport.clientWidth - 24);
-    const current = els.readerViewport.scrollLeft;
+    const current = clamp((state.location.ratio || 0) * max, 0, max);
     const target = direction === "next" ? Math.min(max, current + page) : Math.max(0, current - page);
     const canMove = direction === "next" ? current < max - 8 : current > 8;
     if (!canMove) return false;
 
-    startPageTurn(direction);
+    playPageTurn(direction);
     state.turnDirection = "";
-    els.readerViewport.scrollTo({ left: target, behavior: "smooth" });
     state.location = {
       ...state.location,
       ratio: max > 0 ? clamp(target / max, 0, 1) : 0,
       anchor: "",
     };
+    applyEpubPageOffset(true);
     updateProgressUi();
     persistProgress();
     updateControls();
     return true;
   }
 
-  function startPageTurn(direction) {
+  function queuePageTurn(direction) {
     state.turnDirection = direction;
+  }
+
+  function playPageTurn(direction) {
     applyPageTurnClass(direction);
   }
 
@@ -1397,7 +1444,7 @@
     els.readerViewport.classList.add(direction === "next" ? "is-flipping-next" : "is-flipping-prev");
     state.turnTimer = window.setTimeout(() => {
       els.readerViewport.classList.remove("is-flipping-next", "is-flipping-prev");
-    }, 420);
+    }, 280);
   }
 
   function handleViewportScroll() {
@@ -1641,9 +1688,8 @@
       return;
     }
     if (isPdfPagedMode()) {
-      const step = getPdfPagesPerSpread();
       els.prevBtn.disabled = (state.location.page || 1) <= 1;
-      els.nextBtn.disabled = (state.location.page || 1) + step > state.adapter.pageCount;
+      els.nextBtn.disabled = (state.location.page || 1) >= state.adapter.pageCount;
       return;
     }
     const usesInternalPages = isColumnPagedMode();
@@ -2079,8 +2125,7 @@
 
   function readReaderRatio() {
     if (isColumnPagedMode()) {
-      const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
-      return max > 0 ? clamp(els.readerViewport.scrollLeft / max, 0, 1) : 0;
+      return clamp(state.location?.ratio || 0, 0, 1);
     }
     const max = els.readerViewport.scrollHeight - els.readerViewport.clientHeight;
     return max > 0 ? clamp(els.readerViewport.scrollTop / max, 0, 1) : 0;
