@@ -8,6 +8,8 @@
   const ANNOTATION_PREFIX = "p5reader:annotations:";
   const THEME_KEY = "p5reader:theme";
   const LAYOUT_KEY = "p5reader:layout";
+  const ZOOM_KEY = "p5reader:zoom";
+  const RAILS_KEY = "p5reader:rails";
   const SUPPORTED_TYPES = new Set(["epub", "txt", "pdf"]);
   const ANNOTATION_COLORS = ["#ffd84a", "#7bdff2", "#b2f7a4", "#ff9eb5"];
   const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS[0];
@@ -18,6 +20,13 @@
     bookInput: $("#bookInput"),
     themeSelect: $("#themeSelect"),
     layoutSelect: $("#layoutSelect"),
+    toggleLibraryBtn: $("#toggleLibraryBtn"),
+    toggleToolsBtn: $("#toggleToolsBtn"),
+    focusModeBtn: $("#focusModeBtn"),
+    zoomOutBtn: $("#zoomOutBtn"),
+    zoomInBtn: $("#zoomInBtn"),
+    zoomResetBtn: $("#zoomResetBtn"),
+    zoomLabel: $("#zoomLabel"),
     libraryList: $("#libraryList"),
     libraryCount: $("#libraryCount"),
     tocList: $("#tocList"),
@@ -62,11 +71,16 @@
     scrollFrame: 0,
     resizeFrame: 0,
     libraryFrame: 0,
+    turnTimer: 0,
+    turnDirection: "",
+    pagedMetrics: { pagesPerSpread: 1, pageWidth: 0, pageGap: 0, spreadStep: 0 },
     indexToken: 0,
     indexBookId: null,
     indexReady: false,
     searchClient: null,
     layoutMode: localStorage.getItem(LAYOUT_KEY) || "scroll",
+    zoom: clamp(Number(localStorage.getItem(ZOOM_KEY)) || 1, 0.75, 2.25),
+    rails: loadRailState(),
   };
 
   class BookStore {
@@ -671,7 +685,7 @@
       this.pageCount = 0;
       this.outline = [];
       this.textCache = new Map();
-      this.supportsPagination = false;
+      this.supportsPagination = true;
     }
 
     async load() {
@@ -755,44 +769,69 @@
           }));
     }
 
-    async render(location, viewport) {
+    async render(location, viewport, renderContext = {}) {
       const pageNumber = clamp(location.page || 1, 1, this.pageCount);
-      const page = await this.pdf.getPage(pageNumber);
-      const rawViewport = page.getViewport({ scale: 1 });
-      const availableWidth = Math.max(280, viewport.clientWidth - 44);
-      const scale = clamp(availableWidth / rawViewport.width, 0.55, 2.2);
+      const stage = document.createElement("div");
+      const isPaged = renderContext.layoutMode === "paged";
+      const pagesPerSpread = isPaged ? getPdfPagesPerSpread() : 1;
+      const pageNumbers = Array.from({ length: pagesPerSpread }, (_, index) => pageNumber + index).filter(
+        (page) => page <= this.pageCount,
+      );
+      const pages = await Promise.all(pageNumbers.map((page) => this.pdf.getPage(page)));
+      const rawViewports = pages.map((page) => page.getViewport({ scale: 1 }));
+      const pageGap = isPaged && pageNumbers.length > 1 ? 28 : 0;
+      const availableWidth = Math.max(300, viewport.clientWidth - (isPaged ? 80 : 44));
+      const availableHeight = Math.max(280, viewport.clientHeight - (isPaged ? 76 : 44));
+      const rawWidth = rawViewports.reduce((sum, item) => sum + item.width, 0) + pageGap * Math.max(0, rawViewports.length - 1);
+      const rawHeight = Math.max(...rawViewports.map((item) => item.height));
+      const fitScale = isPaged ? Math.min(availableWidth / rawWidth, availableHeight / rawHeight) : availableWidth / rawViewports[0].width;
+      const scale = clamp(fitScale * (renderContext.zoom || 1), 0.35, 4);
+
+      stage.className = isPaged ? "pdf-stage pdf-spread" : "pdf-stage";
+      stage.style.setProperty("--pdf-page-gap", `${pageGap}px`);
+
+      for (let index = 0; index < pages.length; index += 1) {
+        const pageWrap = await this.renderPageElement(pages[index], rawViewports[index], scale, pageNumbers[index]);
+        stage.append(pageWrap);
+      }
+
+      viewport.replaceChildren(stage);
+      viewport.scrollTop = 0;
+      viewport.scrollLeft = 0;
+    }
+
+    async renderPageElement(page, rawViewport, scale, pageNumber) {
       const renderViewport = page.getViewport({ scale });
       const dpr = window.devicePixelRatio || 1;
-
-      viewport.innerHTML = "";
-      const stage = document.createElement("div");
-      stage.className = "pdf-stage";
       const pageWrap = document.createElement("div");
       pageWrap.className = "pdf-page";
+      pageWrap.dataset.page = String(pageNumber);
       const canvas = document.createElement("canvas");
       const textLayer = document.createElement("div");
-      const context = canvas.getContext("2d", { alpha: false });
+      const canvasContext = canvas.getContext("2d", { alpha: false });
 
       canvas.width = Math.floor(renderViewport.width * dpr);
       canvas.height = Math.floor(renderViewport.height * dpr);
       canvas.style.width = `${Math.floor(renderViewport.width)}px`;
       canvas.style.height = `${Math.floor(renderViewport.height)}px`;
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      canvas.style.backgroundColor = "#ffffff";
+      canvasContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+      canvasContext.fillStyle = "#ffffff";
+      canvasContext.fillRect(0, 0, renderViewport.width, renderViewport.height);
 
       textLayer.className = "pdf-text-layer textLayer";
+      textLayer.dataset.page = String(pageNumber);
       textLayer.style.width = `${Math.floor(renderViewport.width)}px`;
       textLayer.style.height = `${Math.floor(renderViewport.height)}px`;
 
       pageWrap.append(canvas, textLayer);
-      stage.append(pageWrap);
-      viewport.append(stage);
 
       const textContent = await page.getTextContent();
       this.textCache.set(pageNumber, collapseWhitespace(textContent.items.map((item) => item.str).join(" ")));
 
-      await page.render({ canvasContext: context, viewport: renderViewport }).promise;
+      await page.render({ canvasContext, viewport: renderViewport }).promise;
       await this.renderTextLayer(textLayer, textContent, renderViewport);
-      viewport.scrollTop = 0;
+      return pageWrap;
     }
 
     async renderTextLayer(container, textContent, viewport) {
@@ -864,6 +903,8 @@
   async function init() {
     applyTheme(localStorage.getItem(THEME_KEY) || "p5");
     applyLayout(state.layoutMode);
+    applyZoom(state.zoom, false);
+    applyRailState();
     buildColorSwatches();
     bindEvents();
 
@@ -886,6 +927,12 @@
       applyLayout(els.layoutSelect.value);
       if (state.adapter) await renderCurrent();
     });
+    els.toggleLibraryBtn.addEventListener("click", () => toggleRail("left"));
+    els.toggleToolsBtn.addEventListener("click", () => toggleRail("right"));
+    els.focusModeBtn.addEventListener("click", () => toggleFocusMode());
+    els.zoomOutBtn.addEventListener("click", () => changeZoom(-0.1));
+    els.zoomInBtn.addEventListener("click", () => changeZoom(0.1));
+    els.zoomResetBtn.addEventListener("click", () => setZoom(1));
     els.prevBtn.addEventListener("click", () => moveRelative("prev"));
     els.nextBtn.addEventListener("click", () => moveRelative("next"));
     els.searchForm.addEventListener("submit", handleSearch);
@@ -1035,12 +1082,14 @@
       await state.adapter.render(state.location, els.readerViewport, {
         query: els.searchInput.value.trim(),
         layoutMode: state.layoutMode,
+        zoom: state.zoom,
       });
       if (token !== state.renderToken) return;
 
       setupPagedContent();
       decorateCurrentContent();
       restoreReaderPosition();
+      replayPendingPageTurn();
       updateProgressUi();
       persistProgress();
       updateControls();
@@ -1055,6 +1104,8 @@
 
   function prepareViewportLayout() {
     els.readerViewport.classList.toggle("is-paged", isPagedMode());
+    els.readerViewport.classList.toggle("is-column-paged", isColumnPagedMode());
+    els.readerViewport.classList.toggle("is-pdf-paged", isPdfPagedMode());
     els.readerViewport.scrollTop = 0;
     els.readerViewport.scrollLeft = 0;
   }
@@ -1062,27 +1113,53 @@
   function setupPagedContent() {
     const article = els.readerViewport.querySelector(".book-content");
     if (!article) return;
-    article.classList.toggle("is-paginated", isPagedMode());
-    if (!isPagedMode()) {
+    article.classList.toggle("is-paginated", isColumnPagedMode());
+    if (!isColumnPagedMode()) {
       article.style.removeProperty("--reader-page-width");
+      article.style.removeProperty("--reader-page-height");
+      article.style.removeProperty("--reader-page-gap");
+      article.style.removeProperty("--reader-spread-width");
       return;
     }
 
-    const pageWidth = Math.max(320, els.readerViewport.clientWidth - 96);
-    const pageHeight = Math.max(360, els.readerViewport.clientHeight - 64);
+    const metrics = calculateColumnPagedMetrics();
+    state.pagedMetrics = metrics;
+    const pageWidth = metrics.pageWidth;
+    const pageHeight = metrics.pageHeight;
     article.style.setProperty("--reader-page-width", `${pageWidth}px`);
     article.style.setProperty("--reader-page-height", `${pageHeight}px`);
+    article.style.setProperty("--reader-page-gap", `${metrics.pageGap}px`);
+    article.style.setProperty("--reader-spread-width", `${metrics.spreadWidth}px`);
+    article.style.setProperty("--reader-pages-per-spread", String(metrics.pagesPerSpread));
+  }
+
+  function calculateColumnPagedMetrics() {
+    const viewportWidth = Math.max(360, els.readerViewport.clientWidth);
+    const viewportHeight = Math.max(420, els.readerViewport.clientHeight);
+    const pagesPerSpread = viewportWidth >= 760 ? 2 : 1;
+    const sidePadding = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.04), 28, 56) : 22;
+    const pageGap = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.025), 20, 34) : 0;
+    const availableWidth = Math.max(300, viewportWidth - sidePadding * 2);
+    const pageWidth = Math.floor((availableWidth - pageGap * (pagesPerSpread - 1)) / pagesPerSpread);
+    const pageHeight = Math.max(360, viewportHeight - 56);
+    const spreadWidth = pageWidth * pagesPerSpread + pageGap * (pagesPerSpread - 1);
+    const spreadStep = pagesPerSpread * (pageWidth + pageGap);
+    return { pagesPerSpread, pageWidth, pageHeight, pageGap, spreadWidth, spreadStep };
   }
 
   function decorateCurrentContent() {
-    const root = getDecoratableRoot();
-    if (!root) return;
-    applyAnnotations(root);
-    highlightTerm(root, els.searchInput.value.trim());
+    const roots = getDecoratableRoots();
+    for (const root of roots) {
+      applyAnnotations(root);
+      highlightTerm(root, els.searchInput.value.trim());
+    }
   }
 
-  function getDecoratableRoot() {
-    return els.readerViewport.querySelector(".pdf-text-layer") || els.readerViewport.querySelector(".book-content");
+  function getDecoratableRoots() {
+    const pdfLayers = Array.from(els.readerViewport.querySelectorAll(".pdf-text-layer"));
+    if (pdfLayers.length) return pdfLayers;
+    const article = els.readerViewport.querySelector(".book-content");
+    return article ? [article] : [];
   }
 
   function restoreReaderPosition() {
@@ -1097,7 +1174,7 @@
       }
 
       const ratio = clamp(state.location.ratio || 0, 0, 1);
-      if (isPagedMode()) {
+      if (isColumnPagedMode()) {
         const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
         els.readerViewport.scrollLeft = max > 0 ? max * ratio : 0;
       } else if (state.location.unit === "chapter") {
@@ -1249,23 +1326,43 @@
 
   async function moveRelative(direction) {
     if (!state.adapter || !state.location) return;
+    if (await turnPdfSpread(direction)) return;
     if (turnPaged(direction)) return;
+    startPageTurn(direction);
     const nextLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
     await navigateTo(nextLocation);
   }
 
+  async function turnPdfSpread(direction) {
+    if (!isPdfPagedMode() || !state.location || state.location.unit !== "page") return false;
+    const step = getPdfPagesPerSpread();
+    const current = state.location.page || 1;
+    if (direction === "next" && current + step > state.adapter.pageCount) return true;
+    if (direction === "prev" && current <= 1) return true;
+    const target =
+      direction === "next"
+        ? Math.min(state.adapter.pageCount, current + step)
+        : Math.max(1, current - step);
+    if (target === current) return false;
+    startPageTurn(direction);
+    await navigateTo({ unit: "page", page: target });
+    return true;
+  }
+
   function turnPaged(direction) {
-    if (!isPagedMode() || !state.location || state.location.unit !== "chapter") return false;
+    if (!isColumnPagedMode() || !state.location || state.location.unit !== "chapter") return false;
 
     const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
     if (max <= 0) return false;
 
-    const page = Math.max(240, els.readerViewport.clientWidth - 24);
+    const page = Math.max(240, state.pagedMetrics.spreadStep || els.readerViewport.clientWidth - 24);
     const current = els.readerViewport.scrollLeft;
     const target = direction === "next" ? Math.min(max, current + page) : Math.max(0, current - page);
     const canMove = direction === "next" ? current < max - 8 : current > 8;
     if (!canMove) return false;
 
+    startPageTurn(direction);
+    state.turnDirection = "";
     els.readerViewport.scrollTo({ left: target, behavior: "smooth" });
     state.location = {
       ...state.location,
@@ -1276,6 +1373,31 @@
     persistProgress();
     updateControls();
     return true;
+  }
+
+  function startPageTurn(direction) {
+    state.turnDirection = direction;
+    applyPageTurnClass(direction);
+  }
+
+  function replayPendingPageTurn() {
+    if (!state.turnDirection) return;
+    if (!isPagedMode()) {
+      state.turnDirection = "";
+      return;
+    }
+    applyPageTurnClass(state.turnDirection);
+    state.turnDirection = "";
+  }
+
+  function applyPageTurnClass(direction) {
+    window.clearTimeout(state.turnTimer);
+    els.readerViewport.classList.remove("is-flipping-next", "is-flipping-prev");
+    void els.readerViewport.offsetWidth;
+    els.readerViewport.classList.add(direction === "next" ? "is-flipping-next" : "is-flipping-prev");
+    state.turnTimer = window.setTimeout(() => {
+      els.readerViewport.classList.remove("is-flipping-next", "is-flipping-prev");
+    }, 420);
   }
 
   function handleViewportScroll() {
@@ -1304,6 +1426,26 @@
     if (!state.adapter) return;
     const target = event.target;
     if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
+    if (event.ctrlKey && (event.key === "=" || event.key === "+")) {
+      event.preventDefault();
+      changeZoom(0.1);
+      return;
+    }
+    if (event.ctrlKey && event.key === "-") {
+      event.preventDefault();
+      changeZoom(-0.1);
+      return;
+    }
+    if (event.ctrlKey && event.key === "0") {
+      event.preventDefault();
+      setZoom(1);
+      return;
+    }
+    if (event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      toggleFocusMode();
+      return;
+    }
     if (event.key === "Escape") hideAnnotationComposer();
     if (event.key === "ArrowRight" || event.key === "PageDown") {
       event.preventDefault();
@@ -1328,12 +1470,15 @@
 
       const rect = range.getBoundingClientRect();
       if (!rect || (rect.width === 0 && rect.height === 0)) return;
-      showAnnotationComposer({ quote, rect });
+      const pageElement = range.commonAncestorContainer.parentElement?.closest?.(".pdf-page[data-page]");
+      const page = Number(pageElement?.dataset.page);
+      const location = Number.isFinite(page) && page > 0 ? { unit: "page", page } : null;
+      showAnnotationComposer({ quote, rect, location });
     }, 0);
   }
 
-  function showAnnotationComposer({ quote, rect }) {
-    const location = { ...state.location };
+  function showAnnotationComposer({ quote, rect, location: explicitLocation }) {
+    const location = explicitLocation ? { ...explicitLocation } : { ...state.location };
     if (location.unit === "chapter") location.ratio = readReaderRatio();
 
     state.pendingSelection = {
@@ -1430,7 +1575,9 @@
 
   function applyAnnotations(root) {
     if (!state.location || !state.annotations.length) return;
-    const current = state.annotations.filter((annotation) => sameAnnotationLocation(annotation.location, state.location));
+    const page = Number(root.dataset.page);
+    const rootLocation = Number.isFinite(page) && page > 0 ? { unit: "page", page } : state.location;
+    const current = state.annotations.filter((annotation) => sameAnnotationLocation(annotation.location, rootLocation));
     for (const annotation of current) {
       const marked =
         markText(root, annotation.quote, (text) => buildAnnotationMark(annotation, text)) ||
@@ -1493,8 +1640,16 @@
       els.nextBtn.disabled = true;
       return;
     }
-    const atFirstInternalPage = !isPagedMode() || readReaderRatio() <= 0.01;
-    const atLastInternalPage = !isPagedMode() || readReaderRatio() >= 0.99 || els.readerViewport.scrollWidth <= els.readerViewport.clientWidth;
+    if (isPdfPagedMode()) {
+      const step = getPdfPagesPerSpread();
+      els.prevBtn.disabled = (state.location.page || 1) <= 1;
+      els.nextBtn.disabled = (state.location.page || 1) + step > state.adapter.pageCount;
+      return;
+    }
+    const usesInternalPages = isColumnPagedMode();
+    const atFirstInternalPage = !usesInternalPages || readReaderRatio() <= 0.01;
+    const atLastInternalPage =
+      !usesInternalPages || readReaderRatio() >= 0.99 || els.readerViewport.scrollWidth <= els.readerViewport.clientWidth;
     els.prevBtn.disabled = state.adapter.isAtStart(state.location) && atFirstInternalPage;
     els.nextBtn.disabled = state.adapter.isAtEnd(state.location) && atLastInternalPage;
   }
@@ -1502,7 +1657,7 @@
   function updateLayoutControls() {
     const supports = Boolean(state.adapter && state.adapter.supportsPagination);
     els.layoutSelect.disabled = !supports;
-    els.layoutSelect.title = supports ? "EPUB 可切换滚动/分页" : "当前格式使用固定布局";
+    els.layoutSelect.title = supports ? "当前书籍支持分页版式" : "当前格式使用固定版式";
   }
 
   function syncActiveToc() {
@@ -1622,8 +1777,84 @@
     document.body.dataset.layout = state.layoutMode;
   }
 
+  function changeZoom(delta) {
+    setZoom(state.zoom + delta);
+  }
+
+  function setZoom(value) {
+    const next = clamp(Math.round(value * 20) / 20, 0.75, 2.25);
+    if (Math.abs(next - state.zoom) < 0.001) return;
+    state.zoom = next;
+    applyZoom(next, true);
+  }
+
+  function applyZoom(value, shouldRender) {
+    state.zoom = clamp(value, 0.75, 2.25);
+    document.documentElement.style.setProperty("--reader-zoom", String(state.zoom));
+    els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+    els.zoomOutBtn.disabled = state.zoom <= 0.75;
+    els.zoomInBtn.disabled = state.zoom >= 2.25;
+    localStorage.setItem(ZOOM_KEY, String(state.zoom));
+    if (shouldRender && state.adapter) {
+      if (state.location && state.location.unit === "chapter") {
+        state.location = { ...state.location, ratio: readReaderRatio() };
+      }
+      renderCurrent();
+    }
+  }
+
+  function toggleRail(side) {
+    if (side === "left") state.rails.left = !state.rails.left;
+    if (side === "right") state.rails.right = !state.rails.right;
+    applyRailState();
+  }
+
+  function toggleFocusMode() {
+    const collapsed = state.rails.left && state.rails.right;
+    state.rails.left = !collapsed;
+    state.rails.right = !collapsed;
+    applyRailState();
+  }
+
+  function applyRailState() {
+    document.body.classList.toggle("rail-left-collapsed", state.rails.left);
+    document.body.classList.toggle("rail-right-collapsed", state.rails.right);
+    els.toggleLibraryBtn.classList.toggle("is-active", state.rails.left);
+    els.toggleToolsBtn.classList.toggle("is-active", state.rails.right);
+    els.focusModeBtn.classList.toggle("is-active", state.rails.left && state.rails.right);
+    els.toggleLibraryBtn.setAttribute("aria-pressed", String(state.rails.left));
+    els.toggleToolsBtn.setAttribute("aria-pressed", String(state.rails.right));
+    els.focusModeBtn.setAttribute("aria-pressed", String(state.rails.left && state.rails.right));
+    localStorage.setItem(RAILS_KEY, JSON.stringify(state.rails));
+    if (state.adapter) handleResize();
+  }
+
+  function loadRailState() {
+    try {
+      const value = JSON.parse(localStorage.getItem(RAILS_KEY) || "null");
+      return {
+        left: Boolean(value && value.left),
+        right: Boolean(value && value.right),
+      };
+    } catch (_) {
+      return { left: false, right: false };
+    }
+  }
+
   function isPagedMode() {
     return state.layoutMode === "paged" && state.adapter && state.adapter.supportsPagination;
+  }
+
+  function isColumnPagedMode() {
+    return isPagedMode() && state.location && state.location.unit === "chapter";
+  }
+
+  function isPdfPagedMode() {
+    return isPagedMode() && state.location && state.location.unit === "page";
+  }
+
+  function getPdfPagesPerSpread() {
+    return isPdfPagedMode() && els.readerViewport.clientWidth >= 760 ? 2 : 1;
   }
 
   function setBusy(message) {
@@ -1847,7 +2078,7 @@
   }
 
   function readReaderRatio() {
-    if (isPagedMode()) {
+    if (isColumnPagedMode()) {
       const max = els.readerViewport.scrollWidth - els.readerViewport.clientWidth;
       return max > 0 ? clamp(els.readerViewport.scrollLeft / max, 0, 1) : 0;
     }

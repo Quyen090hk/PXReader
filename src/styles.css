@@ -13,6 +13,7 @@
   --warning: #ffd84a;
   --shadow: 10px 10px 0 rgba(0, 0, 0, 0.7);
   --reader-font: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  --reader-zoom: 1;
 }
 
 [data-theme="light"] {
@@ -70,6 +71,7 @@
 html,
 body {
   height: 100%;
+  background-color: var(--bg);
 }
 
 body {
@@ -99,6 +101,7 @@ button {
   grid-template-rows: auto 1fr;
   height: 100%;
   min-width: 320px;
+  background-color: var(--bg);
 }
 
 .topbar {
@@ -108,6 +111,7 @@ button {
   gap: 18px;
   padding: 16px 20px;
   border-bottom: 3px solid var(--accent);
+  background-color: var(--surface);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
 
@@ -203,10 +207,26 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(230px, 300px);
-  gap: 16px;
+  grid-template-columns: var(--left-rail-width, minmax(230px, 280px)) minmax(0, 1fr) var(
+      --right-rail-width,
+      minmax(230px, 300px)
+    );
+  gap: var(--workspace-gap, 16px);
   min-height: 0;
   padding: 16px;
+  transition: grid-template-columns 260ms ease, gap 260ms ease;
+}
+
+body.rail-left-collapsed {
+  --left-rail-width: 0px;
+}
+
+body.rail-right-collapsed {
+  --right-rail-width: 0px;
+}
+
+body.rail-left-collapsed.rail-right-collapsed {
+  --workspace-gap: 0px;
 }
 
 .side-rail,
@@ -214,6 +234,23 @@ button {
   display: grid;
   gap: 16px;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 220ms ease, transform 260ms ease;
+}
+
+body.rail-left-collapsed .side-rail {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-16px);
+}
+
+body.rail-right-collapsed .search-rail {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(16px);
 }
 
 .side-rail {
@@ -228,6 +265,7 @@ button {
 .reader-shell {
   min-width: 0;
   min-height: 0;
+  background-color: var(--surface);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   border: 2px solid var(--line);
   box-shadow: var(--shadow);
@@ -351,6 +389,7 @@ button {
 
 .reader-toolbar {
   border-bottom: 2px solid var(--line);
+  flex-wrap: wrap;
 }
 
 .reader-footer {
@@ -361,6 +400,7 @@ button {
 
 .book-meta {
   min-width: 0;
+  flex: 1 1 220px;
 }
 
 .book-meta strong {
@@ -384,6 +424,9 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .icon-button {
@@ -403,9 +446,33 @@ button {
   border-color: var(--accent-2);
 }
 
+.icon-button.is-active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent-2);
+}
+
 .icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.zoom-label {
+  display: inline-grid;
+  place-items: center;
+  min-width: 52px;
+  height: 34px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.zoom-reset span {
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .progress-track {
@@ -421,18 +488,56 @@ button {
 }
 
 .reader-viewport {
+  position: relative;
   min-height: 0;
   overflow: auto;
   scroll-behavior: smooth;
+  background-color: var(--paper);
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--paper) 96%, var(--accent) 4%), var(--paper));
   color: var(--paper-text);
+  contain: layout paint style;
+  isolation: isolate;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.reader-viewport::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.reader-viewport.is-flipping-next::after {
+  animation: pageCurlNext 380ms ease;
+}
+
+.reader-viewport.is-flipping-prev::after {
+  animation: pageCurlPrev 380ms ease;
 }
 
 .reader-viewport.is-paged {
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
+  perspective: 1800px;
+  scrollbar-width: none;
+}
+
+.reader-viewport.is-paged::-webkit-scrollbar {
+  display: none;
+}
+
+.reader-viewport.is-pdf-paged {
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.reader-viewport.is-pdf-paged::-webkit-scrollbar {
+  display: initial;
 }
 
 .empty-state {
@@ -457,22 +562,24 @@ button {
   width: min(760px, calc(100% - 36px));
   margin: 0 auto;
   padding: 36px 0 56px;
-  font-size: 18px;
+  font-size: calc(18px * var(--reader-zoom));
   line-height: 1.85;
 }
 
 .book-content.is-paginated {
-  width: auto;
+  width: var(--reader-spread-width);
   max-width: none;
   height: var(--reader-page-height);
   max-height: var(--reader-page-height);
-  margin: 32px 48px;
+  margin: 28px auto;
   padding: 0;
   column-width: var(--reader-page-width);
-  column-gap: 72px;
+  column-count: var(--reader-pages-per-spread);
+  column-gap: var(--reader-page-gap);
   column-fill: auto;
   overflow: visible;
   scroll-snap-align: start;
+  transform-origin: 50% 50%;
 }
 
 .book-content.is-paginated > * {
@@ -520,6 +627,17 @@ button {
   place-items: start center;
   min-height: 100%;
   padding: 26px 18px 48px;
+  background-color: var(--paper);
+}
+
+.pdf-stage.pdf-spread {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pdf-page-gap, 28px);
+  min-height: 100%;
+  padding: 28px 34px;
+  transform-origin: 50% 50%;
 }
 
 .pdf-page {
@@ -527,12 +645,84 @@ button {
   max-width: 100%;
   background: #ffffff;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.22);
+  flex: 0 0 auto;
 }
 
 .pdf-page canvas {
   display: block;
   max-width: 100%;
   height: auto;
+  background: #ffffff;
+}
+
+.reader-viewport.is-flipping-next .book-content.is-paginated,
+.reader-viewport.is-flipping-next .pdf-spread {
+  animation: pageFlipNext 380ms cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.reader-viewport.is-flipping-prev .book-content.is-paginated,
+.reader-viewport.is-flipping-prev .pdf-spread {
+  animation: pageFlipPrev 380ms cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+@keyframes pageFlipNext {
+  0% {
+    opacity: 0.82;
+    transform: rotateY(-8deg) translateX(22px) scale(0.985);
+    filter: brightness(0.94);
+  }
+  58% {
+    opacity: 1;
+    transform: rotateY(2deg) translateX(-4px) scale(1);
+    filter: brightness(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes pageFlipPrev {
+  0% {
+    opacity: 0.82;
+    transform: rotateY(8deg) translateX(-22px) scale(0.985);
+    filter: brightness(0.94);
+  }
+  58% {
+    opacity: 1;
+    transform: rotateY(-2deg) translateX(4px) scale(1);
+    filter: brightness(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes pageCurlNext {
+  0% {
+    opacity: 0.42;
+    background: linear-gradient(100deg, transparent 46%, rgba(0, 0, 0, 0.22) 51%, rgba(255, 255, 255, 0.42) 56%, transparent 64%);
+    transform: translateX(18%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-22%);
+  }
+}
+
+@keyframes pageCurlPrev {
+  0% {
+    opacity: 0.42;
+    background: linear-gradient(80deg, transparent 36%, rgba(255, 255, 255, 0.42) 44%, rgba(0, 0, 0, 0.22) 49%, transparent 54%);
+    transform: translateX(-18%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(22%);
+  }
 }
 
 .pdf-text-layer {
@@ -821,6 +1011,16 @@ mark.annotation-mark {
     grid-column: 1 / -1;
     min-height: 300px;
   }
+
+  body.rail-left-collapsed:not(.rail-right-collapsed) .workspace,
+  body.rail-right-collapsed:not(.rail-left-collapsed) .workspace,
+  body.rail-left-collapsed.rail-right-collapsed .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.rail-left-collapsed:not(.rail-right-collapsed) .search-rail {
+    grid-column: 1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -846,6 +1046,11 @@ mark.annotation-mark {
     flex-direction: column;
   }
 
+  body.rail-left-collapsed .side-rail,
+  body.rail-right-collapsed .search-rail {
+    display: none;
+  }
+
   .panel {
     min-height: 220px;
   }
@@ -857,7 +1062,7 @@ mark.annotation-mark {
   .book-content {
     width: min(100% - 24px, 720px);
     padding-top: 24px;
-    font-size: 17px;
+    font-size: calc(17px * var(--reader-zoom));
   }
 
   .book-meta strong {
