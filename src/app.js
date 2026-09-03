@@ -1,4 +1,5 @@
 import { documentDir, join } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import JSZip from "jszip";
@@ -87,6 +88,10 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     turnDirection: "",
     navigationPending: false,
     pointerStart: null,
+    focusMode: false,
+    railsBeforeFocus: null,
+    preserveRailsOnCompactResize: false,
+    focusRestoreTimer: 0,
     compactViewport: window.matchMedia("(max-width: 760px)").matches,
     pagedMetrics: { pagesPerSpread: 1, pageWidth: 0, pageGap: 0, columnGap: 0, spreadStep: 0 },
     indexToken: 0,
@@ -511,6 +516,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       viewport.innerHTML = "";
       const article = document.createElement("article");
       article.className = "book-content epub-content";
+      for (const className of Array.from(doc.body?.classList || [])) {
+        article.classList.add(className);
+      }
       article.dataset.chapterIndex = String(index);
       article.innerHTML = doc.body ? doc.body.innerHTML : doc.documentElement.innerHTML;
 
@@ -552,7 +560,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
           link.remove();
           continue;
         }
-        const css = await this.rewriteCssUrls(await file.async("text"), dirname(path));
+        const css = await this.prepareCss(await file.async("text"), dirname(path), new Set([path]));
         const scoped = scopeCss(css, ".epub-content");
         this.styleCache.set(path, scoped);
         styleTexts.push(scoped);
@@ -560,12 +568,39 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       }
 
       for (const style of Array.from(doc.querySelectorAll("style"))) {
-        const css = await this.rewriteCssUrls(style.textContent || "", baseDir);
+        const css = await this.prepareCss(style.textContent || "", baseDir);
         styleTexts.push(scopeCss(css, ".epub-content"));
         style.remove();
       }
 
       return styleTexts.join("\n");
+    }
+
+    async prepareCss(css, baseDir, visited = new Set()) {
+      const importPattern = /@import\s+(?:url\(\s*(['"]?)([^'")\s]+)\1\s*\)|(['"])([^'"]+)\3)\s*([^;]*);/gi;
+      let prepared = "";
+      let cursor = 0;
+
+      for (const match of css.matchAll(importPattern)) {
+        prepared += css.slice(cursor, match.index);
+        cursor = match.index + match[0].length;
+        const target = (match[2] || match[4] || "").trim();
+        if (!target || /^(data:|https?:|blob:|#)/i.test(target)) continue;
+
+        const path = normalizePath(baseDir, target.split(/[?#]/)[0]);
+        if (visited.has(path)) continue;
+        const file = this.zip.file(path);
+        if (!file) continue;
+
+        const nextVisited = new Set(visited);
+        nextVisited.add(path);
+        const imported = await this.prepareCss(await file.async("text"), dirname(path), nextVisited);
+        const media = (match[5] || "").trim();
+        prepared += media && media.toLowerCase() !== "all" ? `@media ${media}{${imported}}` : imported;
+      }
+
+      prepared += css.slice(cursor);
+      return this.rewriteCssUrls(prepared, baseDir);
     }
 
     async rewriteCssUrls(css, baseDir) {
@@ -980,6 +1015,11 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     window.addEventListener("pagehide", flushProgress);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") flushProgress();
+    });
+    document.addEventListener("fullscreenchange", () => {
+      if (!isTauriRuntime() && state.focusMode && !document.fullscreenElement) {
+        setFocusMode(false, false);
+      }
     });
     document.addEventListener("keydown", handleKeys);
     document.addEventListener("mousedown", (event) => {
@@ -1625,8 +1665,14 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   function handleResize(delay = 160) {
     const compactViewport = window.matchMedia("(max-width: 760px)").matches;
     if (compactViewport && !state.compactViewport) {
-      state.rails = { left: true, right: true };
-      applyRailState(false);
+      if (state.preserveRailsOnCompactResize) {
+        state.preserveRailsOnCompactResize = false;
+        window.clearTimeout(state.focusRestoreTimer);
+        state.focusRestoreTimer = 0;
+      } else {
+        state.rails = { left: true, right: true };
+        applyRailState(false);
+      }
     }
     state.compactViewport = compactViewport;
     if (!state.adapter || !state.location) return;
@@ -1668,9 +1714,19 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function handleKeys(event) {
-    if (!state.adapter) return;
     const target = event.target;
     if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
+    if (event.key.toLowerCase() === "f" || event.key === "F11") {
+      event.preventDefault();
+      toggleFocusMode();
+      return;
+    }
+    if (event.key === "Escape" && state.focusMode) {
+      event.preventDefault();
+      toggleFocusMode();
+      return;
+    }
+    if (!state.adapter) return;
     if (event.ctrlKey && (event.key === "=" || event.key === "+")) {
       event.preventDefault();
       changeZoom(0.1);
@@ -1686,12 +1742,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       setZoom(1);
       return;
     }
-    if (event.key.toLowerCase() === "f") {
-      event.preventDefault();
-      toggleFocusMode();
-      return;
+    if (event.key === "Escape") {
+      hideAnnotationComposer();
     }
-    if (event.key === "Escape") hideAnnotationComposer();
     if (event.key === "ArrowRight" || event.key === "PageDown") {
       event.preventDefault();
       moveRelative("next");
@@ -2078,7 +2131,8 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     }
   }
 
-  function toggleRail(side) {
+  async function toggleRail(side) {
+    if (state.focusMode) await setFocusMode(false, true);
     if (side === "left") {
       state.rails.left = !state.rails.left;
       if (state.compactViewport && !state.rails.left) state.rails.right = true;
@@ -2090,11 +2144,60 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     applyRailState();
   }
 
-  function toggleFocusMode() {
-    const collapsed = state.rails.left && state.rails.right;
-    state.rails.left = !collapsed;
-    state.rails.right = !collapsed;
+  async function toggleFocusMode() {
+    await setFocusMode(!state.focusMode, true);
+  }
+
+  async function setFocusMode(enabled, syncFullscreen) {
+    if (enabled === state.focusMode) return;
+    if (!enabled && syncFullscreen) {
+      const changed = await setAppFullscreen(false);
+      if (!changed || !state.focusMode) return;
+    }
+    if (enabled) {
+      state.preserveRailsOnCompactResize = false;
+      window.clearTimeout(state.focusRestoreTimer);
+      state.focusRestoreTimer = 0;
+      state.railsBeforeFocus = { ...state.rails };
+      state.focusMode = true;
+      state.rails = { left: true, right: true };
+    } else {
+      state.focusMode = false;
+      const compactViewport = window.matchMedia("(max-width: 760px)").matches;
+      state.compactViewport = compactViewport;
+      state.preserveRailsOnCompactResize = !compactViewport;
+      window.clearTimeout(state.focusRestoreTimer);
+      state.focusRestoreTimer = state.preserveRailsOnCompactResize
+        ? window.setTimeout(() => {
+            state.preserveRailsOnCompactResize = false;
+            state.focusRestoreTimer = 0;
+          }, 800)
+        : 0;
+      state.rails = state.railsBeforeFocus || { left: false, right: false };
+      state.railsBeforeFocus = null;
+    }
     applyRailState();
+    if (enabled && syncFullscreen) {
+      const changed = await setAppFullscreen(enabled);
+      if (enabled && !changed) await setFocusMode(false, false);
+    }
+  }
+
+  async function setAppFullscreen(enabled) {
+    try {
+      if (isTauriRuntime()) {
+        await getCurrentWindow().setFullscreen(enabled);
+      } else if (enabled && !document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else if (!enabled && document.fullscreenElement) {
+        await document.exitFullscreen();
+      }
+      return true;
+    } catch (error) {
+      console.error(error);
+      showToast("无法切换全屏，请检查系统窗口权限。");
+      return false;
+    }
   }
 
   function closeCompactRails() {
@@ -2106,16 +2209,17 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   function applyRailState(shouldResize = true) {
     document.body.classList.toggle("rail-left-collapsed", state.rails.left);
     document.body.classList.toggle("rail-right-collapsed", state.rails.right);
+    document.body.classList.toggle("focus-mode", state.focusMode);
     document.body.classList.toggle(
       "compact-rail-open",
       state.compactViewport && (!state.rails.left || !state.rails.right),
     );
     els.toggleLibraryBtn.classList.toggle("is-active", state.rails.left);
     els.toggleToolsBtn.classList.toggle("is-active", state.rails.right);
-    els.focusModeBtn.classList.toggle("is-active", state.rails.left && state.rails.right);
+    els.focusModeBtn.classList.toggle("is-active", state.focusMode);
     els.toggleLibraryBtn.setAttribute("aria-pressed", String(state.rails.left));
     els.toggleToolsBtn.setAttribute("aria-pressed", String(state.rails.right));
-    els.focusModeBtn.setAttribute("aria-pressed", String(state.rails.left && state.rails.right));
+    els.focusModeBtn.setAttribute("aria-pressed", String(state.focusMode));
     localStorage.setItem(RAILS_KEY, JSON.stringify(state.rails));
     if (shouldResize && state.adapter) handleResize(280);
   }
@@ -2313,7 +2417,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function scopeCss(css, scope) {
-    const cleaned = css.replace(/@charset[^;]+;/gi, "");
+    const cleaned = css
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/@(?:charset|import|namespace)\b[^;]*;/gi, "");
     let result = "";
     let index = 0;
 
@@ -2342,8 +2448,11 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
           .map((part) => part.trim())
           .filter(Boolean)
           .map((part) => {
-            if (/^(html|body|:root)$/i.test(part)) return scope;
             if (part.startsWith(scope)) return part;
+            const bodyRoot = part.match(/^(?:(?:html|:root)\s+)?body(?=$|[.#:\[\s>+~])/i);
+            if (bodyRoot) return `${scope}${part.slice(bodyRoot[0].length)}`;
+            const documentRoot = part.match(/^(?:html|:root)(?=$|[.#:\[\s>+~])/i);
+            if (documentRoot) return `${scope}${part.slice(documentRoot[0].length)}`;
             return `${scope} ${part}`;
           })
           .join(", ");
