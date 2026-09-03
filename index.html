@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>P5Reader</title>
     <link rel="stylesheet" href="src/styles.css" />
-    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script defer src="src/app.js"></script>
+    <script type="module" src="src/app.js"></script>
   </head>
   <body data-theme="p5">
     <div class="app-shell">
@@ -21,11 +19,19 @@
         </div>
 
         <div class="topbar-actions">
-          <label class="file-button" for="bookInput">
-            <input id="bookInput" type="file" accept=".epub,.txt,.pdf,application/epub+zip,text/plain,application/pdf" />
+          <button id="importBooksBtn" class="file-button" type="button">
             <span aria-hidden="true">+</span>
             <strong>导入</strong>
-          </label>
+          </button>
+          <input
+            id="bookInput"
+            class="native-file-input"
+            type="file"
+            multiple
+            hidden
+            tabindex="-1"
+            accept=".epub,.txt,.pdf,application/epub+zip,text/plain,application/pdf"
+          />
 
           <label class="theme-picker">
             <span>主题</span>
@@ -146,6 +152,8 @@
         </aside>
       </main>
     </div>
+
+    <button id="railBackdrop" class="rail-backdrop" type="button" aria-label="关闭侧栏" tabindex="-1"></button>
 
     <div id="annotationComposer" class="annotation-composer" hidden>
       <div class="annotation-quote" id="annotationQuote"></div>

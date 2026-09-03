@@ -2,13 +2,14 @@ const { createReadStream, existsSync, statSync, writeFileSync } = require("node:
 const { createServer } = require("node:http");
 const { extname, join, normalize, resolve } = require("node:path");
 
-const root = resolve(__dirname, "..");
+const root = resolve(__dirname, "..", "dist");
 const port = Number(process.env.PORT || 5173);
 
 const mimes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".pdf": "application/pdf",
   ".txt": "text/plain; charset=utf-8",

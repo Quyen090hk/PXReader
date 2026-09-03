@@ -171,9 +171,10 @@ button {
   cursor: pointer;
 }
 
-.file-button input {
-  position: absolute;
-  inset: 0;
+.native-file-input {
+  position: fixed;
+  left: -10000px;
+  top: 0;
   width: 1px;
   height: 1px;
   opacity: 0;
@@ -337,6 +338,25 @@ body.rail-right-collapsed .search-rail {
   color: #ffffff;
   background: var(--accent);
   border-color: var(--accent-2);
+}
+
+.library-item.is-new {
+  border-color: var(--accent);
+  animation: bookshelfArrival 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes bookshelfArrival {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px) skewX(-3deg);
+  }
+  55% {
+    opacity: 1;
+    transform: translateX(4px) skewX(0);
+  }
+  100% {
+    transform: none;
+  }
 }
 
 .library-item strong,
@@ -507,6 +527,12 @@ body.rail-right-collapsed .search-rail {
   overflow-y: hidden;
   scroll-snap-type: none;
   scrollbar-width: none;
+  touch-action: pan-y pinch-zoom;
+}
+
+.reader-viewport.is-column-paged {
+  display: grid;
+  place-items: center;
 }
 
 .reader-viewport.is-paged::-webkit-scrollbar {
@@ -549,20 +575,22 @@ body.rail-right-collapsed .search-rail {
 }
 
 .book-content.is-paginated {
-  position: relative;
+  position: absolute;
+  top: var(--reader-page-inner-y);
+  left: var(--reader-page-inner-x);
   z-index: 1;
   width: var(--reader-page-width);
   max-width: none;
-  height: var(--reader-page-height);
-  max-height: var(--reader-page-height);
+  height: var(--reader-page-content-height);
+  max-height: var(--reader-page-content-height);
   margin: 0;
   padding: 0;
   column-width: var(--reader-page-width);
-  column-gap: var(--reader-page-gap);
+  column-gap: var(--reader-column-gap);
   column-fill: auto;
   overflow: visible;
   scroll-snap-align: start;
-  transform-origin: 50% 50%;
+  transform-origin: 0 50%;
   will-change: transform, opacity;
 }
 
@@ -570,7 +598,14 @@ body.rail-right-collapsed .search-rail {
   transition: transform 220ms cubic-bezier(0.22, 0.7, 0.22, 1);
 }
 
-.book-content.is-paginated > * {
+.book-content.is-paginated h1,
+.book-content.is-paginated h2,
+.book-content.is-paginated h3,
+.book-content.is-paginated figure,
+.book-content.is-paginated table,
+.book-content.is-paginated img,
+.book-content.is-paginated svg,
+.book-content.is-paginated video {
   break-inside: avoid-column;
 }
 
@@ -578,9 +613,10 @@ body.rail-right-collapsed .search-rail {
   position: relative;
   width: var(--reader-spread-width);
   height: var(--reader-page-height);
-  margin: 28px auto;
+  margin: 0 auto;
   overflow: hidden;
   background: var(--paper);
+  border-radius: 4px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
 }
 
@@ -588,8 +624,10 @@ body.rail-right-collapsed .search-rail {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 0;
   background:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.05), transparent 24px, transparent calc(100% - 24px), rgba(0, 0, 0, 0.04)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.045), transparent 22px, transparent calc(100% - 22px), rgba(0, 0, 0, 0.035)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent 18%, rgba(0, 0, 0, 0.025)),
     var(--paper);
   pointer-events: none;
 }
@@ -599,7 +637,7 @@ body.rail-right-collapsed .search-rail {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--reader-page-width) + var(--reader-page-gap) / 2);
+  left: calc(var(--reader-page-outer-width) + var(--reader-page-gap) / 2);
   width: 1px;
   background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.18), transparent);
   pointer-events: none;
@@ -626,7 +664,7 @@ body.rail-right-collapsed .search-rail {
 .book-content.is-paginated img,
 .book-content.is-paginated svg,
 .book-content.is-paginated video {
-  max-height: calc(var(--reader-page-height) - 24px);
+  max-height: calc(var(--reader-page-content-height) - 16px);
   object-fit: contain;
 }
 
@@ -716,8 +754,17 @@ body.rail-right-collapsed .search-rail {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  opacity: 1;
   line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
   text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
 .pdf-text-layer span,
@@ -727,6 +774,18 @@ body.rail-right-collapsed .search-rail {
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdf-text-layer > :not(.markedContent),
+.pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  font-size: calc(var(--text-scale-factor) * var(--font-height, 0));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1)) scale(var(--min-font-size-inv));
+}
+
+.pdf-text-layer .markedContent {
+  display: contents;
 }
 
 .pdf-text-layer ::selection {
@@ -975,6 +1034,19 @@ mark.annotation-mark {
   transform: translateY(0);
 }
 
+.rail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.58);
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
 .is-hidden {
   display: none !important;
 }
@@ -1011,9 +1083,35 @@ mark.annotation-mark {
 }
 
 @media (max-width: 760px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .brand-mark {
+    width: 50px;
+    height: 36px;
+  }
+
+  .brand-block h1 {
+    font-size: 20px;
+  }
+
+  .brand-block p {
+    display: none;
   }
 
   .topbar-actions {
@@ -1022,28 +1120,93 @@ mark.annotation-mark {
   }
 
   .workspace {
-    display: flex;
-    flex-direction: column;
-    min-height: auto;
+    display: block;
+    min-height: 0;
+    padding: 8px;
+    overflow: hidden;
+  }
+
+  .side-rail,
+  .search-rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    width: min(88vw, 340px);
     padding: 10px;
+    background: var(--bg);
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 200ms ease, transform 260ms cubic-bezier(0.22, 0.7, 0.22, 1), visibility 0s;
   }
 
   .side-rail {
-    display: flex;
-    flex-direction: column;
+    left: 0;
+    grid-template-rows: minmax(180px, 0.46fr) minmax(240px, 0.54fr);
   }
 
-  body.rail-left-collapsed .side-rail,
+  .search-rail {
+    right: 0;
+    grid-template-rows: minmax(280px, 0.58fr) minmax(220px, 0.42fr);
+  }
+
+  body.rail-left-collapsed .side-rail {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition-delay: 0s, 0s, 260ms;
+  }
+
   body.rail-right-collapsed .search-rail {
-    display: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(100%);
+    transition-delay: 0s, 0s, 260ms;
   }
 
   .panel {
-    min-height: 220px;
+    min-height: 0;
   }
 
   .reader-shell {
-    min-height: 72vh;
+    height: 100%;
+    min-height: 0;
+    box-shadow: none;
+  }
+
+  .reader-toolbar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .book-meta {
+    flex-basis: 100%;
+  }
+
+  .book-meta strong {
+    max-width: calc(100vw - 40px);
+  }
+
+  .reader-controls {
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .reader-controls::-webkit-scrollbar {
+    display: none;
+  }
+
+  .icon-button,
+  .zoom-label {
+    flex: 0 0 auto;
+  }
+
+  .reader-footer {
+    padding: 9px 10px;
   }
 
   .book-content {
@@ -1052,7 +1215,23 @@ mark.annotation-mark {
     font-size: calc(17px * var(--reader-zoom));
   }
 
-  .book-meta strong {
-    max-width: 48vw;
+  .rail-backdrop {
+    display: block;
+  }
+
+  body.compact-rail-open .rail-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -14,6 +14,7 @@
 - EPUB 内部 CSS 读取、资源 URL 重写和分页模式
 - Web Worker 全文索引
 - Tauri v2 桌面化项目骨架
+- 桌面端原生导入默认打开 `文档/P5Reader/Books`，导入后先加入书架
 
 ## 运行
 
@@ -29,12 +30,18 @@ python -m http.server 5173
 http://localhost:5173
 ```
 
-EPUB 解析依赖 JSZip CDN，PDF 渲染依赖 PDF.js CDN。TXT 会在本地尝试 UTF-8、GB18030、Big5 编码。
+EPUB 解析使用打包后的本地 JSZip，PDF 渲染使用本地 PDF.js，桌面版断网也可完整阅读。TXT 会在本地尝试 UTF-8、GB18030、Big5 编码。
 
 如果安装 npm 依赖，也可以用：
 
 ```powershell
 npm.cmd run serve
+```
+
+质量检查：
+
+```powershell
+npm.cmd run check
 ```
 
 ## 桌面版

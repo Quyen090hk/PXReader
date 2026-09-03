@@ -1,3 +1,11 @@
+import { documentDir, join } from "@tauri-apps/api/path";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { readFile } from "@tauri-apps/plugin-fs";
+import JSZip from "jszip";
+import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
+
+const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).href;
+
 (() => {
   "use strict";
 
@@ -17,6 +25,7 @@
   const $ = (selector) => document.querySelector(selector);
 
   const els = {
+    importBooksBtn: $("#importBooksBtn"),
     bookInput: $("#bookInput"),
     themeSelect: $("#themeSelect"),
     layoutSelect: $("#layoutSelect"),
@@ -54,6 +63,7 @@
     annotationSaveNote: $("#annotationSaveNote"),
     annotationCancel: $("#annotationCancel"),
     annotationColors: $("#annotationColors"),
+    railBackdrop: $("#railBackdrop"),
     toast: $("#toast"),
   };
 
@@ -69,15 +79,22 @@
     selectedAnnotationColor: DEFAULT_ANNOTATION_COLOR,
     renderToken: 0,
     scrollFrame: 0,
-    resizeFrame: 0,
+    resizeTimer: 0,
     libraryFrame: 0,
+    progressTimer: 0,
+    pendingProgress: null,
     turnTimer: 0,
     turnDirection: "",
-    pagedMetrics: { pagesPerSpread: 1, pageWidth: 0, pageGap: 0, spreadStep: 0 },
+    navigationPending: false,
+    pointerStart: null,
+    compactViewport: window.matchMedia("(max-width: 760px)").matches,
+    pagedMetrics: { pagesPerSpread: 1, pageWidth: 0, pageGap: 0, columnGap: 0, spreadStep: 0 },
     indexToken: 0,
+    indexStartTimer: 0,
     indexBookId: null,
     indexReady: false,
     searchClient: null,
+    lastImportedId: null,
     layoutMode: localStorage.getItem(LAYOUT_KEY) || "scroll",
     zoom: clamp(Number(localStorage.getItem(ZOOM_KEY)) || 1, 0.75, 2.25),
     rails: loadRailState(),
@@ -270,7 +287,8 @@
       return `第 ${index + 1} / ${this.chapters.length} 章`;
     }
 
-    async getIndexUnits() {
+    async getIndexUnits(_onProgress, shouldCancel) {
+      if (shouldCancel?.()) return [];
       return this.chapters.map((chapter, index) => ({
         id: String(index),
         title: chapter.title,
@@ -303,11 +321,7 @@
     }
 
     async load() {
-      if (!window.JSZip) {
-        throw new Error("EPUB parser is not loaded. Check the JSZip CDN.");
-      }
-
-      this.zip = await window.JSZip.loadAsync(this.record.blob);
+      this.zip = await JSZip.loadAsync(this.record.blob);
       this.opfPath = await this.resolveOpfPath();
       this.opfDir = dirname(this.opfPath);
       const opfFile = this.zip.file(this.opfPath);
@@ -657,9 +671,10 @@
       return text;
     }
 
-    async getIndexUnits(onProgress) {
+    async getIndexUnits(onProgress, shouldCancel) {
       const units = [];
       for (let index = 0; index < this.chapters.length; index += 1) {
+        if (shouldCancel?.()) break;
         units.push({
           id: String(index),
           title: this.chapters[index].title,
@@ -667,12 +682,24 @@
           location: { unit: "chapter", index, ratio: 0 },
         });
         if (onProgress) onProgress(index + 1, this.chapters.length);
+        if ((index + 1) % 24 === 0) await yieldToMainThread();
       }
       return units;
     }
 
+    releaseIndexSourceCache() {
+      this.textCache.clear();
+    }
+
     async search(query) {
       return searchTextUnits(query, await this.getIndexUnits());
+    }
+
+    destroy() {
+      for (const url of this.resourceUrls.values()) URL.revokeObjectURL(url);
+      this.resourceUrls.clear();
+      this.textCache.clear();
+      this.styleCache.clear();
     }
   }
 
@@ -689,15 +716,10 @@
     }
 
     async load() {
-      if (!window.pdfjsLib) {
-        throw new Error("PDF renderer is not loaded. Check the PDF.js CDN.");
-      }
-
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
 
       const data = new Uint8Array(await this.record.blob.arrayBuffer());
-      this.pdf = await window.pdfjsLib.getDocument({ data }).promise;
+      this.pdf = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
       this.pageCount = this.pdf.numPages;
 
       try {
@@ -823,6 +845,7 @@
       textLayer.dataset.page = String(pageNumber);
       textLayer.style.width = `${Math.floor(renderViewport.width)}px`;
       textLayer.style.height = `${Math.floor(renderViewport.height)}px`;
+      textLayer.style.setProperty("--total-scale-factor", String(renderViewport.scale));
 
       pageWrap.append(canvas, textLayer);
 
@@ -835,16 +858,8 @@
     }
 
     async renderTextLayer(container, textContent, viewport) {
-      if (window.pdfjsLib && typeof window.pdfjsLib.renderTextLayer === "function") {
-        const task = window.pdfjsLib.renderTextLayer({
-          textContentSource: textContent,
-          container,
-          viewport,
-          textDivs: [],
-          enhanceTextSelection: true,
-        });
-        if (task && task.promise) await task.promise;
-      }
+      const textLayer = new pdfjsLib.TextLayer({ textContentSource: textContent, container, viewport });
+      await textLayer.render();
     }
 
     next(location) {
@@ -881,9 +896,10 @@
       return text;
     }
 
-    async getIndexUnits(onProgress) {
+    async getIndexUnits(onProgress, shouldCancel) {
       const units = [];
       for (let page = 1; page <= this.pageCount; page += 1) {
+        if (shouldCancel?.()) break;
         units.push({
           id: String(page),
           title: `第 ${page} 页`,
@@ -891,12 +907,23 @@
           location: { unit: "page", page },
         });
         if (onProgress) onProgress(page, this.pageCount);
+        if (page % 12 === 0) await yieldToMainThread();
       }
       return units;
     }
 
+    releaseIndexSourceCache() {
+      this.textCache.clear();
+    }
+
     async search(query) {
       return searchTextUnits(query, await this.getIndexUnits());
+    }
+
+    async destroy() {
+      this.textCache.clear();
+      if (this.pdf) await this.pdf.destroy();
+      this.pdf = null;
     }
   }
 
@@ -904,6 +931,7 @@
     applyTheme(localStorage.getItem(THEME_KEY) || "p5");
     applyLayout(state.layoutMode);
     applyZoom(state.zoom, false);
+    if (state.compactViewport) state.rails = { left: true, right: true };
     applyRailState();
     buildColorSwatches();
     bindEvents();
@@ -921,6 +949,7 @@
   }
 
   function bindEvents() {
+    els.importBooksBtn.addEventListener("click", handleImportRequest);
     els.bookInput.addEventListener("change", handleFileImport);
     els.themeSelect.addEventListener("change", () => applyTheme(els.themeSelect.value));
     els.layoutSelect.addEventListener("change", async () => {
@@ -938,12 +967,20 @@
     els.searchForm.addEventListener("submit", handleSearch);
     els.rebuildIndexBtn.addEventListener("click", () => rebuildSearchIndex(true));
     els.readerViewport.addEventListener("scroll", handleViewportScroll, { passive: true });
+    els.readerViewport.addEventListener("pointerdown", handleReaderPointerDown, { passive: true });
+    els.readerViewport.addEventListener("pointerup", handleReaderPointerUp, { passive: true });
+    els.readerViewport.addEventListener("pointercancel", clearReaderPointer);
     els.readerViewport.addEventListener("mouseup", handleReaderSelection);
     els.readerViewport.addEventListener("keyup", handleReaderSelection);
     els.annotationSaveHighlight.addEventListener("click", () => savePendingAnnotation(false));
     els.annotationSaveNote.addEventListener("click", () => savePendingAnnotation(true));
     els.annotationCancel.addEventListener("click", hideAnnotationComposer);
+    els.railBackdrop.addEventListener("click", closeCompactRails);
     window.addEventListener("resize", handleResize);
+    window.addEventListener("pagehide", flushProgress);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushProgress();
+    });
     document.addEventListener("keydown", handleKeys);
     document.addEventListener("mousedown", (event) => {
       if (!els.annotationComposer.contains(event.target) && !els.readerViewport.contains(event.target)) {
@@ -952,37 +989,79 @@
     });
   }
 
-  async function handleFileImport(event) {
-    const file = event.target.files && event.target.files[0];
-    event.target.value = "";
-    if (!file) return;
+  async function handleImportRequest() {
+    if (!isTauriRuntime()) {
+      els.bookInput.click();
+      return;
+    }
 
-    const type = inferType(file.name, file.type);
-    if (!SUPPORTED_TYPES.has(type)) {
+    els.importBooksBtn.disabled = true;
+    try {
+      const shelfDir = await join(await documentDir(), "P5Reader", "Books");
+      const selected = await openDialog({
+        title: "选择要加入书架的书籍",
+        defaultPath: shelfDir,
+        multiple: true,
+        directory: false,
+        filters: [{ name: "电子书", extensions: ["epub", "txt", "pdf"] }],
+      });
+      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      if (!paths.length) return;
+
+      const files = [];
+      for (const path of paths) {
+        const name = path.split(/[\\/]/).pop() || "book";
+        const bytes = await readFile(path);
+        files.push(new File([bytes], name, { type: mimeFromPath(name), lastModified: Date.now() }));
+      }
+      await importFiles(files);
+    } catch (error) {
+      console.error(error);
+      showToast(error.message || "无法打开书架目录。");
+    } finally {
+      els.importBooksBtn.disabled = false;
+    }
+  }
+
+  async function handleFileImport(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    await importFiles(files);
+  }
+
+  async function importFiles(files) {
+    if (!files.length) return;
+
+    const supportedFiles = files
+      .map((file) => ({ file, type: inferType(file.name, file.type) }))
+      .filter(({ type }) => SUPPORTED_TYPES.has(type));
+    if (!supportedFiles.length) {
       showToast("只支持 EPUB、TXT、PDF。");
       return;
     }
 
-    const record = {
-      id: fileId(file),
-      name: file.name,
-      type,
-      size: file.size,
-      lastModified: file.lastModified,
-      addedAt: Date.now(),
-      title: stripExtension(file.name),
-      blob: file,
-    };
-
     try {
-      if (state.db) {
-        await state.db.put(record);
-        await refreshLibrary();
-      } else {
-        state.library = [record, ...state.library.filter((book) => book.id !== record.id)];
-        renderLibrary();
+      const records = [];
+      for (const { file, type } of supportedFiles) {
+        const record = {
+          id: fileId(file),
+          name: file.name,
+          type,
+          size: file.size,
+          lastModified: file.lastModified,
+          addedAt: Date.now(),
+          title: stripExtension(file.name),
+          blob: file,
+        };
+        records.push(record);
+        if (state.db) await state.db.put(record);
+        else state.library = [record, ...state.library.filter((book) => book.id !== record.id)];
       }
-      await openBook(record);
+      state.lastImportedId = records.at(-1)?.id || null;
+      if (state.db) await refreshLibrary();
+      else renderLibrary();
+      revealBookshelf();
+      showToast(records.length > 1 ? `已将 ${records.length} 本书加入书架。` : "已加入书架。");
     } catch (error) {
       console.error(error);
       showToast(error.message || "导入失败。");
@@ -1006,12 +1085,15 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "library-item";
+      button.dataset.bookId = record.id;
       if (state.activeBookRecord && state.activeBookRecord.id === record.id) button.classList.add("is-active");
+      if (state.lastImportedId === record.id) button.classList.add("is-new");
       button.innerHTML = `
         <strong>${escapeHtml(record.title || stripExtension(record.name))}</strong>
         <span>${record.type.toUpperCase()} · ${formatBytes(record.size)} · ${formatProgress(record.id)}</span>
       `;
       button.addEventListener("click", async () => {
+        state.lastImportedId = null;
         const fresh = state.db ? await state.db.get(record.id) : record;
         if (fresh) await openBook(fresh);
       });
@@ -1019,8 +1101,24 @@
     }
   }
 
+  function revealBookshelf() {
+    if (state.rails.left) {
+      state.rails.left = false;
+      if (state.compactViewport) state.rails.right = true;
+      applyRailState();
+    }
+    requestAnimationFrame(() => {
+      const item = state.lastImportedId
+        ? els.libraryList.querySelector(`[data-book-id="${cssEscape(state.lastImportedId)}"]`)
+        : null;
+      item?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   async function openBook(record) {
     const token = ++state.renderToken;
+    state.indexToken += 1;
+    window.clearTimeout(state.indexStartTimer);
     setBusy(`正在打开 ${record.name}...`);
     state.indexReady = false;
     state.indexBookId = null;
@@ -1038,7 +1136,9 @@
         state.library = [record, ...state.library.filter((book) => book.id !== record.id)];
       }
 
+      flushProgress();
       state.activeBookRecord = record;
+      const previousAdapter = state.adapter;
       state.adapter = adapter;
       state.toc = adapter.getToc();
       state.annotations = loadAnnotations(record.id);
@@ -1053,7 +1153,8 @@
       renderAnnotations();
       updateLayoutControls();
       await renderCurrent();
-      rebuildSearchIndex(false);
+      disposeAdapter(previousAdapter);
+      scheduleSearchIndexBuild();
       showToast("已打开。");
     } catch (error) {
       console.error(error);
@@ -1115,28 +1216,46 @@
     if (!article) return;
     article.classList.toggle("is-paginated", isColumnPagedMode());
     if (!isColumnPagedMode()) {
-      article.style.removeProperty("--reader-page-width");
-      article.style.removeProperty("--reader-page-height");
-      article.style.removeProperty("--reader-page-gap");
-      article.style.removeProperty("--reader-spread-width");
+      const frame = article.parentElement?.classList.contains("epub-page-frame") ? article.parentElement : null;
+      [
+        "--reader-page-width",
+        "--reader-page-height",
+        "--reader-page-gap",
+        "--reader-column-gap",
+        "--reader-spread-width",
+        "--reader-page-outer-width",
+        "--reader-page-content-height",
+        "--reader-page-inner-x",
+        "--reader-page-inner-y",
+        "--reader-pages-per-spread",
+      ].forEach((prop) => article.style.removeProperty(prop));
       article.style.removeProperty("transform");
+      if (frame) {
+        frame.parentNode.insertBefore(article, frame);
+        frame.remove();
+      }
       return;
     }
 
     const metrics = calculateColumnPagedMetrics();
     state.pagedMetrics = metrics;
     const frame = ensureEpubPageFrame(article);
-    const pageWidth = metrics.pageWidth;
-    const pageHeight = metrics.pageHeight;
-    article.style.setProperty("--reader-page-width", `${pageWidth}px`);
-    article.style.setProperty("--reader-page-height", `${pageHeight}px`);
-    article.style.setProperty("--reader-page-gap", `${metrics.pageGap}px`);
-    article.style.setProperty("--reader-spread-width", `${metrics.spreadWidth}px`);
-    article.style.setProperty("--reader-pages-per-spread", String(metrics.pagesPerSpread));
-    frame.style.setProperty("--reader-page-width", `${pageWidth}px`);
-    frame.style.setProperty("--reader-page-height", `${pageHeight}px`);
-    frame.style.setProperty("--reader-page-gap", `${metrics.pageGap}px`);
-    frame.style.setProperty("--reader-spread-width", `${metrics.spreadWidth}px`);
+    const pageVars = {
+      "--reader-page-width": `${metrics.pageWidth}px`,
+      "--reader-page-height": `${metrics.pageHeight}px`,
+      "--reader-page-gap": `${metrics.pageGap}px`,
+      "--reader-column-gap": `${metrics.columnGap}px`,
+      "--reader-spread-width": `${metrics.spreadWidth}px`,
+      "--reader-page-outer-width": `${metrics.pageOuterWidth}px`,
+      "--reader-page-content-height": `${metrics.contentHeight}px`,
+      "--reader-page-inner-x": `${metrics.pageInnerX}px`,
+      "--reader-page-inner-y": `${metrics.pageInnerY}px`,
+      "--reader-pages-per-spread": String(metrics.pagesPerSpread),
+    };
+    Object.entries(pageVars).forEach(([prop, value]) => {
+      article.style.setProperty(prop, value);
+      frame.style.setProperty(prop, value);
+    });
     frame.classList.toggle("is-double-page", metrics.pagesPerSpread === 2);
     syncEpubPagerExtent(article);
     requestAnimationFrame(() => syncEpubPagerExtent(article));
@@ -1169,15 +1288,33 @@
   function calculateColumnPagedMetrics() {
     const viewportWidth = Math.max(360, els.readerViewport.clientWidth);
     const viewportHeight = Math.max(420, els.readerViewport.clientHeight);
-    const pagesPerSpread = viewportWidth >= 760 ? 2 : 1;
-    const sidePadding = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.04), 28, 56) : 22;
-    const pageGap = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.025), 20, 34) : 0;
-    const availableWidth = Math.max(300, viewportWidth - sidePadding * 2);
-    const pageWidth = Math.floor((availableWidth - pageGap * (pagesPerSpread - 1)) / pagesPerSpread);
-    const pageHeight = Math.max(360, viewportHeight - 56);
-    const spreadWidth = pageWidth * pagesPerSpread + pageGap * (pagesPerSpread - 1);
-    const spreadStep = pagesPerSpread * (pageWidth + pageGap);
-    return { pagesPerSpread, pageWidth, pageHeight, pageGap, spreadWidth, spreadStep };
+    const pagesPerSpread = viewportWidth >= 840 ? 2 : 1;
+    const viewportInsetX = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.035), 24, 44) : 20;
+    const viewportInsetY = clamp(Math.round(viewportHeight * 0.035), 18, 30);
+    const pageGap = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.018), 18, 28) : 0;
+    const availableWidth = Math.max(320, viewportWidth - viewportInsetX * 2);
+    const pageOuterWidth = Math.floor((availableWidth - pageGap * (pagesPerSpread - 1)) / pagesPerSpread);
+    const pageHeight = Math.max(360, viewportHeight - viewportInsetY * 2);
+    const pageInnerX = clamp(Math.round(pageOuterWidth * 0.08), 30, 54);
+    const pageInnerY = clamp(Math.round(pageHeight * 0.075), 28, 50);
+    const pageWidth = Math.max(220, pageOuterWidth - pageInnerX * 2);
+    const contentHeight = Math.max(280, pageHeight - pageInnerY * 2);
+    const columnGap = pageGap + pageInnerX * 2;
+    const spreadWidth = pageOuterWidth * pagesPerSpread + pageGap * (pagesPerSpread - 1);
+    const spreadStep = pagesPerSpread * (pageWidth + columnGap);
+    return {
+      pagesPerSpread,
+      pageWidth,
+      pageHeight,
+      pageOuterWidth,
+      pageInnerX,
+      pageInnerY,
+      contentHeight,
+      pageGap,
+      columnGap,
+      spreadWidth,
+      spreadStep,
+    };
   }
 
   function applyEpubPageOffset(animated) {
@@ -1329,26 +1466,43 @@
         return;
       }
 
-      const units = await state.adapter.getIndexUnits((done, total) => {
-        if (token === state.indexToken) {
-          els.searchStatus.textContent = `正在抽取文本 ${done} / ${total}...`;
-        }
-      });
+      let lastProgressAt = 0;
+      const units = await state.adapter.getIndexUnits(
+        (done, total) => {
+          const now = performance.now();
+          if (token === state.indexToken && (done === total || now - lastProgressAt >= 100)) {
+            lastProgressAt = now;
+            els.searchStatus.textContent = `正在抽取文本 ${done} / ${total}...`;
+          }
+        },
+        () => token !== state.indexToken,
+      );
       if (token !== state.indexToken) return;
 
       const result = await client.build(state.activeBookRecord.id, units);
       if (token !== state.indexToken) return;
+      state.adapter.releaseIndexSourceCache?.();
       state.indexReady = true;
       state.indexBookId = state.activeBookRecord.id;
       els.searchStatus.textContent = `全文索引已就绪：${result.unitCount} 个单元，${result.termCount} 个词项。`;
       if (manual) showToast("全文索引已重建。");
     } catch (error) {
+      if (token !== state.indexToken) return;
       console.error(error);
       els.searchStatus.textContent = "全文索引不可用，搜索会回退到直接扫描。";
       if (manual) showToast(error.message || "索引建立失败。");
     } finally {
-      els.rebuildIndexBtn.disabled = false;
+      if (token === state.indexToken) els.rebuildIndexBtn.disabled = false;
     }
+  }
+
+  function scheduleSearchIndexBuild() {
+    window.clearTimeout(state.indexStartTimer);
+    const bookId = state.activeBookRecord?.id;
+    state.indexStartTimer = window.setTimeout(() => {
+      state.indexStartTimer = 0;
+      if (bookId && state.activeBookRecord?.id === bookId) rebuildSearchIndex(false);
+    }, 350);
   }
 
   function ensureSearchClient() {
@@ -1369,12 +1523,17 @@
   }
 
   async function moveRelative(direction) {
-    if (!state.adapter || !state.location) return;
-    if (await turnPdfSpread(direction)) return;
-    if (turnPaged(direction)) return;
-    queuePageTurn(direction);
-    const nextLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
-    await navigateTo(nextLocation);
+    if (!state.adapter || !state.location || state.navigationPending) return;
+    state.navigationPending = true;
+    try {
+      if (await turnPdfSpread(direction)) return;
+      if (turnPaged(direction)) return;
+      queuePageTurn(direction);
+      const nextLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
+      await navigateTo(nextLocation);
+    } finally {
+      state.navigationPending = false;
+    }
   }
 
   async function turnPdfSpread(direction) {
@@ -1463,10 +1622,49 @@
     });
   }
 
-  function handleResize() {
+  function handleResize(delay = 160) {
+    const compactViewport = window.matchMedia("(max-width: 760px)").matches;
+    if (compactViewport && !state.compactViewport) {
+      state.rails = { left: true, right: true };
+      applyRailState(false);
+    }
+    state.compactViewport = compactViewport;
     if (!state.adapter || !state.location) return;
-    if (state.resizeFrame) cancelAnimationFrame(state.resizeFrame);
-    state.resizeFrame = requestAnimationFrame(() => renderCurrent());
+    if (state.location.unit === "chapter") {
+      state.location = { ...state.location, ratio: readReaderRatio(), anchor: "" };
+    }
+    window.clearTimeout(state.resizeTimer);
+    state.resizeTimer = window.setTimeout(() => {
+      state.resizeTimer = 0;
+      renderCurrent();
+    }, delay);
+  }
+
+  function handleReaderPointerDown(event) {
+    if (!isPagedMode() || event.pointerType !== "touch") return;
+    if (event.target.closest("a, button, input, textarea, select")) return;
+    state.pointerStart = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      at: performance.now(),
+    };
+  }
+
+  function handleReaderPointerUp(event) {
+    const start = state.pointerStart;
+    clearReaderPointer();
+    if (!start || start.id !== event.pointerId || !isPagedMode()) return;
+    if (!window.getSelection()?.isCollapsed) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    const threshold = Math.max(56, els.readerViewport.clientWidth * 0.1);
+    if (performance.now() - start.at > 700 || Math.abs(dx) < threshold || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    moveRelative(dx < 0 ? "next" : "prev");
+  }
+
+  function clearReaderPointer() {
+    state.pointerStart = null;
   }
 
   function handleKeys(event) {
@@ -1727,18 +1925,39 @@
     if (bestButton) bestButton.classList.add("is-active");
   }
 
-  function persistProgress() {
+  function persistProgress(immediate = false) {
     if (!state.activeBookRecord || !state.adapter || !state.location) return;
     const percentage = state.adapter.getPercentage(state.location);
-    const progress = {
-      bookId: state.activeBookRecord.id,
-      location: state.location,
-      percentage,
-      label: state.adapter.getLocationLabel(state.location),
-      updatedAt: Date.now(),
+    state.pendingProgress = {
+      key: `${PROGRESS_PREFIX}${state.activeBookRecord.id}`,
+      value: {
+        bookId: state.activeBookRecord.id,
+        location: { ...state.location },
+        percentage,
+        label: state.adapter.getLocationLabel(state.location),
+        updatedAt: Date.now(),
+      },
     };
-    localStorage.setItem(`${PROGRESS_PREFIX}${state.activeBookRecord.id}`, JSON.stringify(progress));
-    scheduleLibraryRender();
+    if (immediate) {
+      flushProgress();
+      return;
+    }
+    window.clearTimeout(state.progressTimer);
+    state.progressTimer = window.setTimeout(flushProgress, 320);
+  }
+
+  function flushProgress() {
+    window.clearTimeout(state.progressTimer);
+    state.progressTimer = 0;
+    const pending = state.pendingProgress;
+    state.pendingProgress = null;
+    if (!pending) return;
+    try {
+      localStorage.setItem(pending.key, JSON.stringify(pending.value));
+      scheduleLibraryRender();
+    } catch (error) {
+      console.warn("Unable to save reading progress.", error);
+    }
   }
 
   function scheduleLibraryRender() {
@@ -1787,6 +2006,11 @@
   }
 
   function resetReader() {
+    flushProgress();
+    state.indexToken += 1;
+    window.clearTimeout(state.indexStartTimer);
+    state.indexStartTimer = 0;
+    disposeAdapter(state.adapter);
     state.activeBookRecord = null;
     state.adapter = null;
     state.location = null;
@@ -1808,6 +2032,11 @@
     updateProgressUi();
     updateControls();
     updateLayoutControls();
+  }
+
+  function disposeAdapter(adapter) {
+    if (!adapter || typeof adapter.destroy !== "function") return;
+    Promise.resolve(adapter.destroy()).catch((error) => console.warn("Unable to release reader resources.", error));
   }
 
   function applyTheme(theme) {
@@ -1850,8 +2079,14 @@
   }
 
   function toggleRail(side) {
-    if (side === "left") state.rails.left = !state.rails.left;
-    if (side === "right") state.rails.right = !state.rails.right;
+    if (side === "left") {
+      state.rails.left = !state.rails.left;
+      if (state.compactViewport && !state.rails.left) state.rails.right = true;
+    }
+    if (side === "right") {
+      state.rails.right = !state.rails.right;
+      if (state.compactViewport && !state.rails.right) state.rails.left = true;
+    }
     applyRailState();
   }
 
@@ -1862,9 +2097,19 @@
     applyRailState();
   }
 
-  function applyRailState() {
+  function closeCompactRails() {
+    if (!state.compactViewport) return;
+    state.rails = { left: true, right: true };
+    applyRailState();
+  }
+
+  function applyRailState(shouldResize = true) {
     document.body.classList.toggle("rail-left-collapsed", state.rails.left);
     document.body.classList.toggle("rail-right-collapsed", state.rails.right);
+    document.body.classList.toggle(
+      "compact-rail-open",
+      state.compactViewport && (!state.rails.left || !state.rails.right),
+    );
     els.toggleLibraryBtn.classList.toggle("is-active", state.rails.left);
     els.toggleToolsBtn.classList.toggle("is-active", state.rails.right);
     els.focusModeBtn.classList.toggle("is-active", state.rails.left && state.rails.right);
@@ -1872,7 +2117,7 @@
     els.toggleToolsBtn.setAttribute("aria-pressed", String(state.rails.right));
     els.focusModeBtn.setAttribute("aria-pressed", String(state.rails.left && state.rails.right));
     localStorage.setItem(RAILS_KEY, JSON.stringify(state.rails));
-    if (state.adapter) handleResize();
+    if (shouldResize && state.adapter) handleResize(280);
   }
 
   function loadRailState() {
@@ -2168,6 +2413,10 @@
     return ext;
   }
 
+  function isTauriRuntime() {
+    return Boolean(window.__TAURI_INTERNALS__);
+  }
+
   function fileId(file) {
     return `${file.name.toLowerCase()}::${file.size}::${file.lastModified}`;
   }
@@ -2198,6 +2447,10 @@
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+  }
+
+  function yieldToMainThread() {
+    return new Promise((resolve) => window.setTimeout(resolve, 0));
   }
 
   function escapeHtml(value) {
