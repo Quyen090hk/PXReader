@@ -53,6 +53,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     zoomLabel: $("#zoomLabel"),
     libraryList: $("#libraryList"),
     libraryCount: $("#libraryCount"),
+    tocHeading: $("#tocHeading"),
     tocList: $("#tocList"),
     tocCount: $("#tocCount"),
     readerViewport: $("#readerViewport"),
@@ -89,6 +90,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     adapter: null,
     location: null,
     toc: [],
+    bookFormatText: "等待导入",
     annotations: [],
     pendingSelection: null,
     annotationHideTimer: 0,
@@ -106,6 +108,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     turnTimer: 0,
     turnDirection: "",
     navigationPending: false,
+    isLayoutTransitioning: false,
     pointerStart: null,
     scrollPullStart: null,
     focusMode: false,
@@ -1020,13 +1023,18 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     els.focusThemeModeBtn.addEventListener("click", (event) => toggleThemeMode(event.currentTarget));
     for (const button of els.layoutButtons) {
       button.addEventListener("click", async () => {
-        if (button.disabled || button.dataset.layout === state.layoutMode) return;
-        applyLayout(button.dataset.layout);
-        if (state.adapter) await renderCurrent();
+        if (button.disabled || button.dataset.layout === state.layoutMode || state.isLayoutTransitioning) return;
+        await switchLayout(button.dataset.layout);
       });
     }
     els.toggleLibraryBtn.addEventListener("click", () => toggleRail("left"));
     els.toggleToolsBtn.addEventListener("click", () => toggleRail("right"));
+    els.tocHeading.addEventListener("click", scrollToCurrentToc);
+    els.tocHeading.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      scrollToCurrentToc();
+    });
     els.focusModeBtn.addEventListener("click", () => toggleFocusMode());
     els.zoomOutBtn.addEventListener("click", () => changeZoom(-0.1));
     els.zoomInBtn.addEventListener("click", () => changeZoom(0.1));
@@ -1220,7 +1228,8 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       state.location = sanitizeSavedLocation(loadProgress(record.id)?.location, adapter) || adapter.getInitialLocation();
 
       els.bookTitle.textContent = record.title;
-      els.bookFormat.textContent = `${record.type.toUpperCase()} · ${metadata.count || 0} 单元`;
+      state.bookFormatText = `${record.type.toUpperCase()} · ${metadata.count || 0} 单元`;
+      updateReaderMeta();
       els.searchInput.value = "";
       renderToc();
       renderLibrary();
@@ -1419,8 +1428,8 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     return article ? [article] : [];
   }
 
-  function restoreReaderPosition() {
-    requestAnimationFrame(() => {
+  function restoreReaderPosition(immediately = false) {
+    const restore = () => {
       if (!state.location) return;
       if (state.location.anchor) {
         const namedAnchor = Array.from(document.getElementsByName(state.location.anchor)).find((node) =>
@@ -1437,7 +1446,10 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
         const max = els.readerViewport.scrollHeight - els.readerViewport.clientHeight;
         els.readerViewport.scrollTop = max > 0 ? max * ratio : 0;
       }
-    });
+    };
+
+    if (immediately) restore();
+    else requestAnimationFrame(restore);
   }
 
   function renderToc() {
@@ -2107,16 +2119,19 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   function updateProgressUi() {
     if (!state.adapter || !state.location) {
       els.progressFill.style.width = "0%";
-      els.progressLabel.textContent = "0%";
+      els.progressLabel.textContent = "0.00%";
       els.locationLabel.textContent = "尚未打开书籍";
+      updateReaderMeta();
       return;
     }
 
     const percentage = state.adapter.getPercentage(state.location);
-    const text = `${Math.round(percentage * 100)}%`;
-    els.progressFill.style.width = text;
+    const value = clamp(percentage * 100, 0, 100);
+    const text = `${value.toFixed(2)}%`;
+    els.progressFill.style.width = `${value}%`;
     els.progressLabel.textContent = text;
     els.locationLabel.textContent = state.adapter.getLocationLabel(state.location);
+    updateReaderMeta();
   }
 
   function updateControls() {
@@ -2148,23 +2163,54 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   function syncActiveToc() {
     const buttons = Array.from(els.tocList.querySelectorAll(".toc-item"));
+    const previouslyActive = els.tocList.querySelector(".toc-item.is-active");
     for (const button of buttons) button.classList.remove("is-active");
-    if (!state.location) return;
+    const activeIndex = getCurrentTocIndex();
+    if (activeIndex < 0) return;
+    const bestButton = buttons[activeIndex];
+    if (!bestButton) return;
+    bestButton.classList.add("is-active");
+    if (bestButton !== previouslyActive) scrollActiveTocToTop(bestButton);
+  }
 
-    let bestButton = null;
+  function getCurrentTocIndex() {
+    if (!state.location) return -1;
+    let bestIndex = -1;
     let bestOrder = -1;
+    const currentOrder = locationOrder(state.location);
     state.toc.forEach((item, index) => {
-      if (sameUnit(item.location, state.location)) {
-        const itemOrder = locationOrder(item.location);
-        const currentOrder = locationOrder(state.location);
-        if (itemOrder <= currentOrder && itemOrder >= bestOrder) {
-          bestOrder = itemOrder;
-          bestButton = buttons[index];
-        }
+      if (!sameUnit(item.location, state.location)) return;
+      const itemOrder = locationOrder(item.location);
+      if (itemOrder <= currentOrder && itemOrder >= bestOrder) {
+        bestOrder = itemOrder;
+        bestIndex = index;
       }
     });
+    return bestIndex;
+  }
 
-    if (bestButton) bestButton.classList.add("is-active");
+  function updateReaderMeta() {
+    const currentTocItem = state.toc[getCurrentTocIndex()];
+    const chapterTitle = currentTocItem?.title || state.adapter?.getLocationLabel(state.location) || state.bookFormatText;
+    const text = state.rails.left && state.adapter && state.location ? chapterTitle : state.bookFormatText;
+    if (els.bookFormat.textContent !== text) els.bookFormat.textContent = text;
+  }
+
+  function scrollToCurrentToc() {
+    const activeIndex = getCurrentTocIndex();
+    if (activeIndex < 0) return;
+    const item = els.tocList.querySelector(`[data-toc-index="${activeIndex}"]`);
+    if (item) scrollActiveTocToTop(item);
+  }
+
+  function scrollActiveTocToTop(item) {
+    requestAnimationFrame(() => {
+      if (!item.isConnected) return;
+      const listRect = els.tocList.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const targetTop = Math.max(0, els.tocList.scrollTop + itemRect.top - listRect.top - 8);
+      els.tocList.scrollTo({ top: targetTop, behavior: "smooth" });
+    });
   }
 
   function persistProgress(immediate = false) {
@@ -2257,11 +2303,12 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     state.adapter = null;
     state.location = null;
     state.toc = [];
+    state.bookFormatText = "等待导入";
     state.annotations = [];
     state.indexReady = false;
     state.indexBookId = null;
     els.bookTitle.textContent = "未选择书籍";
-    els.bookFormat.textContent = "等待导入";
+    updateReaderMeta();
     els.readerViewport.innerHTML = `
       <div class="empty-state">
         <strong>选择一本书开始阅读</strong>
@@ -2281,7 +2328,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     Promise.resolve(adapter.destroy()).catch((error) => console.warn("Unable to release reader resources.", error));
   }
 
-  function applyTheme(theme, { revealFrom = null, modeIconSource = null } = {}) {
+  function applyTheme(theme, { revealFrom = null, revealStyle = "clock", modeIconSource = null } = {}) {
     const { style, mode, key: nextTheme } = getThemeParts(theme);
     const previousTheme = document.body.dataset.theme;
     const commitTheme = () => {
@@ -2313,6 +2360,11 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const y = rect.top + rect.height / 2;
     document.documentElement.style.setProperty("--theme-reveal-x", `${x}px`);
     document.documentElement.style.setProperty("--theme-reveal-y", `${y}px`);
+    if (revealStyle === "radial") {
+      const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+      document.documentElement.style.setProperty("--theme-reveal-radius", `${radius}px`);
+    }
+    document.documentElement.classList.add(`is-theme-reveal-${revealStyle}`);
     if (modeIconSource) {
       modeIconSource.style.setProperty("view-transition-name", "theme-mode-icon");
       document.documentElement.classList.add(`is-theme-mode-to-${mode}`);
@@ -2321,7 +2373,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const clearRevealState = () => {
       document.documentElement.style.removeProperty("--theme-reveal-x");
       document.documentElement.style.removeProperty("--theme-reveal-y");
+      document.documentElement.style.removeProperty("--theme-reveal-radius");
       modeIconSource?.style.removeProperty("view-transition-name");
+      document.documentElement.classList.remove("is-theme-reveal-clock", "is-theme-reveal-radial");
       document.documentElement.classList.remove("is-theme-mode-to-light", "is-theme-mode-to-dark");
     };
 
@@ -2355,6 +2409,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const icon = source === els.themeModeBtn ? els.themeModeIcon : els.focusThemeModeIcon;
     applyTheme(`${style}-${mode === "dark" ? "light" : "dark"}`, {
       revealFrom: source,
+      revealStyle: "radial",
       modeIconSource: icon,
     });
   }
@@ -2363,7 +2418,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const { style, mode } = getThemeParts(document.body.dataset.theme);
     const styles = ["p3", "p4", "p5"];
     const nextStyle = styles[(styles.indexOf(style) + 1) % styles.length];
-    applyTheme(`${nextStyle}-${mode}`, { revealFrom: source });
+    applyTheme(`${nextStyle}-${mode}`, { revealFrom: source, revealStyle: "clock" });
   }
 
   function syncThemeStyleToggle(style) {
@@ -2387,7 +2442,8 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function applyLayout(layout) {
-    state.layoutMode = layout === "paged" ? "paged" : "scroll";
+    const nextLayout = layout === "paged" ? "paged" : "scroll";
+    state.layoutMode = nextLayout;
     for (const button of els.layoutButtons) {
       const active = button.dataset.layout === state.layoutMode;
       button.classList.toggle("is-active", active);
@@ -2396,6 +2452,72 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     cancelScrollChapterAdvance();
     localStorage.setItem(LAYOUT_KEY, state.layoutMode);
     document.body.dataset.layout = state.layoutMode;
+  }
+
+  async function switchLayout(layout) {
+    const nextLayout = layout === "paged" ? "paged" : "scroll";
+    const canAnimate = Boolean(
+      state.adapter && !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    );
+
+    if (!canAnimate) {
+      applyLayout(nextLayout);
+      if (state.adapter) await relayoutCurrentContent();
+      return;
+    }
+
+    state.isLayoutTransitioning = true;
+    els.readerViewport.classList.add("is-layout-relayouting");
+    try {
+      // Let the feedback animation paint before recalculating a chapter's columns.
+      await nextAnimationFrame();
+      applyLayout(nextLayout);
+      await relayoutCurrentContent();
+      await waitForDuration(140);
+    } catch (error) {
+      console.warn("Unable to switch reader layout.", error);
+      if (state.layoutMode !== nextLayout) {
+        applyLayout(nextLayout);
+        await relayoutCurrentContent();
+      }
+    } finally {
+      els.readerViewport.classList.remove("is-layout-relayouting");
+      state.isLayoutTransitioning = false;
+    }
+  }
+
+  async function relayoutCurrentContent() {
+    const article = els.readerViewport.querySelector(".book-content");
+    if (!article) {
+      await renderCurrent();
+      return;
+    }
+
+    if (state.location?.unit === "chapter") {
+      state.location = {
+        ...state.location,
+        ratio: readReaderRatio(),
+        anchor: "",
+      };
+    }
+
+    hideAnnotationComposer(true);
+    prepareViewportLayout();
+    setupPagedContent();
+    await nextAnimationFrame();
+    restoreReaderPosition(true);
+    updateProgressUi();
+    persistProgress();
+    updateControls();
+    syncActiveToc();
+  }
+
+  function nextAnimationFrame() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  function waitForDuration(duration) {
+    return new Promise((resolve) => window.setTimeout(resolve, duration));
   }
 
   function changeZoom(delta) {
@@ -2532,6 +2654,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     els.focusModeBtn.setAttribute("aria-pressed", String(state.focusMode));
     els.focusModeBtn.setAttribute("aria-label", state.focusMode ? "退出沉浸模式" : "进入沉浸模式");
     els.focusModeBtn.title = state.focusMode ? "退出沉浸模式" : "进入沉浸模式";
+    updateReaderMeta();
     localStorage.setItem(RAILS_KEY, JSON.stringify(state.rails));
     if (shouldResize && state.adapter) {
       window.clearTimeout(state.railResizeTimer);

@@ -12,9 +12,6 @@
       <header class="topbar">
         <div class="brand-block">
           <button id="themeStyleBtn" class="brand-mark" type="button" aria-label="当前 P5 主题，切换主题风格" title="切换主题风格">P5</button>
-          <div>
-            <h1>PXReader</h1>
-          </div>
         </div>
 
         <div class="topbar-actions">
@@ -46,6 +43,7 @@
           <div class="layout-picker" role="group" aria-label="阅读版式">
             <span class="control-label">版式</span>
             <div class="layout-segments">
+              <span class="layout-indicator" aria-hidden="true"></span>
               <button class="layout-option" type="button" data-layout="scroll" aria-pressed="true" title="连续滚动阅读">滚动</button>
               <button class="layout-option" type="button" data-layout="paged" aria-pressed="false" title="分页阅读">分页</button>
             </div>
@@ -64,7 +62,7 @@
           </section>
 
           <section class="panel toc-panel">
-            <div class="panel-heading">
+            <div id="tocHeading" class="panel-heading toc-heading" role="button" tabindex="0" aria-label="定位到当前章节" title="定位到当前章节">
               <h2>目录</h2>
               <span id="tocCount">0</span>
             </div>
@@ -131,7 +129,7 @@
 
           <footer class="reader-footer">
             <div class="reader-status">
-              <span id="progressLabel">0%</span>
+              <span id="progressLabel">0.00%</span>
               <span id="locationLabel">尚未打开书籍</span>
             </div>
             <button id="focusModeBtn" class="icon-button footer-focus" type="button" aria-label="全屏沉浸式阅读" title="全屏沉浸式阅读">
