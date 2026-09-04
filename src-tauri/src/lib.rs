@@ -8,10 +8,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             if let Ok(document_dir) = app.path().document_dir() {
-                std::fs::create_dir_all(document_dir.join("P5Reader").join("Books"))?;
+                std::fs::create_dir_all(document_dir.join("PXReader").join("Books"))?;
             }
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running P5Reader");
+        .expect("error while running PXReader");
 }

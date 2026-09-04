@@ -1,6 +1,6 @@
-# P5Reader
+# PXReader
 
-P5Reader 是一款面向本地电子书的桌面阅读器，支持 EPUB、TXT 与 PDF。项目以沉浸、专注和可持续阅读为设计目标：书籍留在本地，阅读进度、标注与书库状态由应用在设备端维护。
+PXReader 是一款面向本地电子书的桌面阅读器，支持 EPUB、TXT 与 PDF。项目以沉浸、专注和可持续阅读为设计目标：书籍留在本地，阅读进度、标注与书库状态由应用在设备端维护。
 
 应用提供 Persona 3、Persona 4 与 Persona 5 三组明暗主题，同时保持阅读正文、目录、全文检索与笔记工具的一致操作方式。
 
@@ -63,7 +63,7 @@ npm run check
 
 ## 桌面应用
 
-P5Reader 使用 Tauri v2 提供桌面打包能力。开始之前，请安装 Rust 工具链与对应平台的 Tauri 前置依赖。
+PXReader 使用 Tauri v2 提供桌面打包能力。开始之前，请安装 Rust 工具链与对应平台的 Tauri 前置依赖。
 
 ```powershell
 npm ci

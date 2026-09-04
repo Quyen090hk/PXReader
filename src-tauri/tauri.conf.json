@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "P5Reader",
+  "productName": "PXReader",
   "version": "0.1.0",
   "identifier": "com.p5reader.reader",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "P5Reader",
+        "title": "PXReader",
         "width": 1280,
         "height": 840,
         "minWidth": 680,

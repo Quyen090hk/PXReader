@@ -1015,7 +1015,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   function bindEvents() {
     els.importBooksBtn.addEventListener("click", handleImportRequest);
     els.bookInput.addEventListener("change", handleFileImport);
-    els.brandMark.addEventListener("click", cycleThemeStyle);
+    els.brandMark.addEventListener("click", (event) => cycleThemeStyle(event.currentTarget));
     els.themeModeBtn.addEventListener("click", (event) => toggleThemeMode(event.currentTarget));
     els.focusThemeModeBtn.addEventListener("click", (event) => toggleThemeMode(event.currentTarget));
     for (const button of els.layoutButtons) {
@@ -1072,7 +1072,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
     els.importBooksBtn.disabled = true;
     try {
-      const shelfDir = await join(await documentDir(), "P5Reader", "Books");
+      const shelfDir = await join(await documentDir(), "PXReader", "Books");
       const selected = await openDialog({
         title: "选择要加入书架的书籍",
         defaultPath: shelfDir,
@@ -2281,14 +2281,10 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     Promise.resolve(adapter.destroy()).catch((error) => console.warn("Unable to release reader resources.", error));
   }
 
-  function applyTheme(theme, { animate = true, revealFrom = null, modeIconSource = null } = {}) {
+  function applyTheme(theme, { revealFrom = null, modeIconSource = null } = {}) {
     const { style, mode, key: nextTheme } = getThemeParts(theme);
     const previousTheme = document.body.dataset.theme;
     const commitTheme = () => {
-      if (!animate) {
-        window.clearTimeout(applyTheme.timer);
-        document.body.classList.remove("is-theme-switching");
-      }
       document.body.dataset.theme = nextTheme;
       document.body.dataset.themeStyle = style;
       document.body.dataset.colorMode = mode;
@@ -2298,14 +2294,6 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       syncThemeModeToggle(els.themeModeBtn, els.themeModeIcon, mode);
       syncThemeModeToggle(els.focusThemeModeBtn, els.focusThemeModeIcon, mode);
       localStorage.setItem(THEME_KEY, nextTheme);
-
-      if (animate && previousTheme && previousTheme !== nextTheme) {
-        document.body.classList.remove("is-theme-switching");
-        void document.body.offsetWidth;
-        document.body.classList.add("is-theme-switching");
-        window.clearTimeout(applyTheme.timer);
-        applyTheme.timer = window.setTimeout(() => document.body.classList.remove("is-theme-switching"), 430);
-      }
     };
 
     const canReveal = Boolean(
@@ -2323,10 +2311,8 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const rect = revealFrom.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
     document.documentElement.style.setProperty("--theme-reveal-x", `${x}px`);
     document.documentElement.style.setProperty("--theme-reveal-y", `${y}px`);
-    document.documentElement.style.setProperty("--theme-reveal-radius", `${radius}px`);
     if (modeIconSource) {
       modeIconSource.style.setProperty("view-transition-name", "theme-mode-icon");
       document.documentElement.classList.add(`is-theme-mode-to-${mode}`);
@@ -2335,7 +2321,6 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const clearRevealState = () => {
       document.documentElement.style.removeProperty("--theme-reveal-x");
       document.documentElement.style.removeProperty("--theme-reveal-y");
-      document.documentElement.style.removeProperty("--theme-reveal-radius");
       modeIconSource?.style.removeProperty("view-transition-name");
       document.documentElement.classList.remove("is-theme-mode-to-light", "is-theme-mode-to-dark");
     };
@@ -2369,17 +2354,16 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const { style, mode } = getThemeParts(document.body.dataset.theme);
     const icon = source === els.themeModeBtn ? els.themeModeIcon : els.focusThemeModeIcon;
     applyTheme(`${style}-${mode === "dark" ? "light" : "dark"}`, {
-      animate: false,
       revealFrom: source,
       modeIconSource: icon,
     });
   }
 
-  function cycleThemeStyle() {
+  function cycleThemeStyle(source) {
     const { style, mode } = getThemeParts(document.body.dataset.theme);
     const styles = ["p3", "p4", "p5"];
     const nextStyle = styles[(styles.indexOf(style) + 1) % styles.length];
-    applyTheme(`${nextStyle}-${mode}`);
+    applyTheme(`${nextStyle}-${mode}`, { revealFrom: source });
   }
 
   function syncThemeStyleToggle(style) {

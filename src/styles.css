@@ -1557,18 +1557,10 @@ body[data-theme^="p5"] {
     repeating-linear-gradient(135deg, color-mix(in srgb, var(--text) 3%, transparent) 0 1px, transparent 1px 24px);
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: var(--accent);
-  opacity: 0;
-  pointer-events: none;
-}
-
-body.is-theme-switching::before {
-  animation: themeShift 420ms var(--motion-curve) both;
+@property --theme-sweep-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
 }
 
 ::view-transition-old(root),
@@ -1578,7 +1570,17 @@ body.is-theme-switching::before {
 }
 
 ::view-transition-new(root) {
-  animation: themeModeReveal 560ms var(--motion-curve) both;
+  animation: themeClockSweep 780ms cubic-bezier(0.22, 0.7, 0.22, 1) both;
+  -webkit-mask-image: conic-gradient(
+    from -90deg at var(--theme-reveal-x) var(--theme-reveal-y),
+    #000 0deg var(--theme-sweep-angle),
+    transparent var(--theme-sweep-angle) 360deg
+  );
+  mask-image: conic-gradient(
+    from -90deg at var(--theme-reveal-x) var(--theme-reveal-y),
+    #000 0deg var(--theme-sweep-angle),
+    transparent var(--theme-sweep-angle) 360deg
+  );
 }
 
 :root.is-theme-mode-to-light::view-transition-old(theme-mode-icon) {
@@ -2657,31 +2659,13 @@ body.rail-right-collapsed .search-rail {
   }
 }
 
-@keyframes themeShift {
-  0% {
-    opacity: 0;
-  }
-
-  42% {
-    opacity: 0.3;
-  }
-
-  58% {
-    opacity: 0.3;
-  }
-
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes themeModeReveal {
+@keyframes themeClockSweep {
   from {
-    clip-path: circle(0px at var(--theme-reveal-x) var(--theme-reveal-y));
+    --theme-sweep-angle: 0deg;
   }
 
   to {
-    clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
+    --theme-sweep-angle: 360deg;
   }
 }
 
@@ -2836,8 +2820,6 @@ body.rail-right-collapsed .search-rail {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before,
-  body.is-theme-switching::before,
   body.app-ready .topbar,
   body.app-ready .side-rail,
   body.app-ready .reader-shell,

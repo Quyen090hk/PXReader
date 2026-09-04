@@ -45,6 +45,6 @@ server.on("error", (error) => {
 
 server.listen(port, "127.0.0.1", () => {
   if (process.stdout.isTTY) {
-    console.log(`P5Reader dev server: http://127.0.0.1:${port}`);
+    console.log(`PXReader dev server: http://127.0.0.1:${port}`);
   }
 });
