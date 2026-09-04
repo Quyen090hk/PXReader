@@ -1,114 +1,112 @@
 # PXReader
 
-PXReader 是一款面向本地电子书的桌面阅读器，支持 EPUB、TXT 与 PDF。项目以沉浸、专注和可持续阅读为设计目标：书籍留在本地，阅读进度、标注与书库状态由应用在设备端维护。
+<p align="center">
+  <img src="src-tauri/icons/icon.png" width="128" alt="PXReader application icon" />
+</p>
 
-应用提供 Persona 3、Persona 4 与 Persona 5 三组明暗主题，同时保持阅读正文、目录、全文检索与笔记工具的一致操作方式。
+PXReader is a local-first desktop reader for EPUB, TXT, and PDF. It keeps books, reading progress, search indexes, and annotations on the device so that a focused reading workflow does not require an account or network service.
 
-## 功能概览
+## Highlights
 
-- 导入并阅读 EPUB、TXT、PDF 文件
-- 本地书库：使用 IndexedDB 保存已导入书籍
-- 阅读进度：为每本书独立记录当前阅读位置
-- 目录导航：TXT 自动分章，EPUB 使用内部目录，PDF 支持逐页定位
-- 全文检索：通过 Web Worker 在后台构建索引，减少对阅读操作的干扰
-- 高亮与笔记：选中正文即可添加高亮或笔记，并可回到原始位置
-- 阅读版式：支持滚动与分页阅读；EPUB / TXT 可调整字号缩放
-- 沉浸模式：隐藏系统外的界面干扰，专注于书页
-- 离线可用：EPUB 解包、PDF 渲染与文本解码均在本地完成
+- Read local EPUB, TXT, and PDF files from one workspace.
+- Keep an on-device library with independent reading progress for each book.
+- Navigate by table of contents, previous/next controls, keyboard, touch, or reading gestures.
+- Search full text in a background worker without blocking the reading view.
+- Select text to create highlights and notes, then return to the recorded location.
+- Use immersion mode to focus on the page while keeping essential controls available.
+- Choose P3, P4, or P5 visual styles and switch light/dark mode from the reader.
 
-## 文件支持
+## Reading Experience
 
-| 格式 | 阅读能力 |
+PXReader is designed around continuous reading rather than document management overhead.
+
+- **Responsive workspace**: library, reader, and tool rails can be opened or collapsed independently. When the table of contents is hidden, the reader header shows the current chapter title.
+- **Table of contents recovery**: click the `目录` header to bring the active chapter back to the top of the outline after manually browsing a long list.
+- **Progress continuity**: progress is saved per book and shown to two decimal places.
+- **Scroll chapter gestures**: in immersion mode, continue scrolling past the bottom to move forward; push upward from the top to return to the previous chapter at its end. This also works for short chapters that do not produce a scrollbar.
+- **EPUB layout switch**: EPUB can switch between continuous and paged reading. The switch reuses the current chapter DOM and recalculates page metrics instead of reparsing the chapter.
+- **Comfort controls**: font scale, page controls, rail state, theme, and layout preference are retained locally.
+
+## Format Support
+
+| Format | Capabilities |
 | --- | --- |
-| EPUB | 目录解析、资源路径重写、内部链接跳转、滚动 / 分页阅读、全文检索、标注 |
-| TXT | UTF-8、GB18030、Big5 编码尝试识别、自动分章、滚动阅读、全文检索、标注 |
-| PDF | Canvas 渲染、可选择文本层、逐页阅读、全文检索、标注 |
+| EPUB | Package and outline parsing, local resource rewriting, internal links, continuous or paged reading, full-text search, and annotations. |
+| TXT | UTF-8, GB18030, and Big5 decoding attempts, automatic chapter splitting, continuous reading, search, and annotations. |
+| PDF | Canvas rendering, selectable text layer, single/double-page reading based on available space, outline navigation, search, and annotations. |
 
-## 界面与操作
+## Privacy and Local Data
 
-主界面由书库、阅读区与工具区组成。侧栏可按需收起，阅读区始终保持最大的可用空间。
+PXReader does not upload book content to a remote service. Imported books are stored locally through IndexedDB or the desktop WebView, while progress, annotations, theme, rail state, zoom, and layout preferences are stored locally on the device.
 
-- 点击“导入”添加一本或多本本地书籍
-- 使用左右方向键切换章节或页面
-- 使用上下方向键或 Page Up / Page Down 滚动正文
-- `Ctrl` + `+` / `-` 调整字号，`Ctrl` + `0` 重置字号
-- `F` 或 `F11` 切换沉浸模式，`Esc` 退出
-- 在正文中选中文字即可打开高亮与笔记面板
+Clear local browser/WebView data only after backing up any books or notes that must be retained.
 
-## 快速开始
+## Quick Start
 
-### 环境要求
+### Requirements
 
-- Node.js 22.13 或更高版本
-- npm 10 或更高版本
+- Node.js 20 or newer
+- npm 10 or newer
 
-### Web 预览
+### Web Preview
 
 ```powershell
-npm ci
+npm install
 npm run serve
 ```
 
-然后在浏览器打开 [http://localhost:5173](http://localhost:5173)。
+Open [http://localhost:5173](http://localhost:5173) in a browser. Use the local server instead of opening `index.html` with `file://`, because full-text search depends on a Web Worker.
 
-> 不建议直接以 `file://` 打开 `index.html`，因为全文检索依赖 Web Worker。
+### Desktop Development
 
-### 质量检查
-
-```powershell
-npm run check
-```
-
-该命令会检查前端模块语法并重新构建可分发的 Web 资源。
-
-## 桌面应用
-
-PXReader 使用 Tauri v2 提供桌面打包能力。开始之前，请安装 Rust 工具链与对应平台的 Tauri 前置依赖。
+PXReader uses Tauri v2 for desktop packaging. Install a current Rust toolchain and the platform prerequisites required by Tauri, then run:
 
 ```powershell
-npm ci
+npm install
 npm run tauri:dev
 ```
 
-构建安装包：
+Create the Windows NSIS installer with:
 
 ```powershell
 npm run tauri:build
 ```
 
-构建过程会先执行 `npm run build:web`，将应用资源输出到 `dist/`，再由 Tauri 生成桌面产物。Windows 默认目标为 NSIS 安装包。
+The desktop bundle uses `src-tauri/icons/icon.ico`. The PNG source is retained at `src-tauri/icons/icon.png` and is also used as the browser favicon.
 
-## 项目结构
+## Quality Checks
+
+```powershell
+npm run check
+```
+
+This validates the browser modules and rebuilds the distributable static assets in `dist/`.
+
+## Project Structure
 
 ```text
 .
-├── src/
-│   ├── app.js              # 阅读器状态、格式适配器与交互逻辑
-│   ├── search-worker.js    # 后台全文索引与搜索
-│   └── styles.css          # 主题、响应式布局与阅读界面
-├── src-tauri/              # Tauri v2 桌面端配置与 Rust 入口
-├── scripts/
-│   ├── build-static.mjs    # Web 静态资源构建
-│   └── serve-static.cjs    # 本地静态预览服务
-└── index.html              # 应用页面入口
+|- src/
+|  |- app.js              # Reader state, format adapters, and interactions
+|  |- search-worker.js    # Background full-text indexing and search
+|  `- styles.css          # Themes, responsive layout, and reader UI
+|- src-tauri/
+|  |- icons/              # Desktop icon source and Windows icon bundle
+|  |- src/                # Tauri application entry points
+|  `- tauri.conf.json     # Desktop window and bundle configuration
+|- scripts/
+|  |- build-static.mjs    # Static web build
+|  `- serve-static.cjs    # Local preview server
+|- index.html             # Application shell
+`- README.md
 ```
 
-## 本地数据
+## Architecture
 
-导入的书籍保存在浏览器或 WebView 的 IndexedDB 中；阅读进度、主题、版式、缩放比例和标注保存在本地存储中。应用不会将书籍内容上传到远程服务。
-
-如需清除本地书库或阅读数据，请通过浏览器开发者工具或系统 WebView 数据管理功能操作。清除前请确认已备份需要保留的书籍与笔记。
-
-## 开发说明
-
-核心阅读逻辑位于 `src/app.js`，通过统一适配器接口处理不同格式：
+`src/app.js` exposes a shared reading workflow through three format adapters:
 
 - `TxtAdapter`
 - `EpubAdapter`
 - `PdfAdapter`
 
-适配器负责文件加载、内容渲染、目录、搜索单元、进度定位和前后导航；界面层仅维护当前书籍、阅读位置、搜索结果与标注状态。该结构让新增格式或调整阅读视图时能够保持边界清晰。
-
-## 许可
-
-本仓库当前未附带许可证文件。使用、修改或分发前，请先取得项目作者的明确授权。
+Each adapter owns loading, navigation, search units, progress calculations, and rendering for its format. The UI layer coordinates the active book, view state, annotations, and local persistence, keeping format-specific behavior isolated from the surrounding reader interface.

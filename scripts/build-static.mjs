@@ -11,6 +11,7 @@ if (existsSync(dist)) {
 
 mkdirSync(dist, { recursive: true });
 cpSync(resolve(root, "index.html"), resolve(dist, "index.html"));
+copyFileSync(resolve(root, "src-tauri/icons/icon.png"), resolve(dist, "icon.png"));
 mkdirSync(resolve(dist, "src"), { recursive: true });
 copyFileSync(resolve(root, "src/styles.css"), resolve(dist, "src/styles.css"));
 copyFileSync(resolve(root, "src/search-worker.js"), resolve(dist, "src/search-worker.js"));

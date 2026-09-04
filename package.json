@@ -7,7 +7,6 @@
     "serve": "npm run build:web && node scripts/serve-static.cjs",
     "build:web": "node scripts/build-static.mjs",
     "check": "node --check src/app.js && node --check src/search-worker.js && npm run build:web",
-    "generate:icon": "node scripts/generate-icon.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
