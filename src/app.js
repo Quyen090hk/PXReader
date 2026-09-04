@@ -19,7 +19,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   const LAYOUT_KEY = "p5reader:layout";
   const ZOOM_KEY = "p5reader:zoom";
   const RAILS_KEY = "p5reader:rails";
-  const THEMES = new Set(["p3-light", "p3-dark", "p4-light", "p4-dark", "p5-light", "p5-dark"]);
+  const THEME_STYLES = new Set(["p3", "p4", "p5"]);
+  const THEME_MODES = new Set(["light", "dark"]);
+  const THEMES = new Set(Array.from(THEME_STYLES, (style) => [`${style}-light`, `${style}-dark`]).flat());
   const LEGACY_THEMES = {
     p5: "p5-dark",
     light: "p5-light",
@@ -35,9 +37,13 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   const els = {
     importBooksBtn: $("#importBooksBtn"),
     bookInput: $("#bookInput"),
-    brandMark: $(".brand-mark"),
-    themeSelect: $("#themeSelect"),
-    layoutSelect: $("#layoutSelect"),
+    brandMark: $("#themeStyleBtn"),
+    emptyStateMark: $(".empty-state-mark span"),
+    themeModeBtn: $("#themeModeBtn"),
+    themeModeIcon: $("#themeModeIcon"),
+    focusThemeModeBtn: $("#focusThemeModeBtn"),
+    focusThemeModeIcon: $("#focusThemeModeIcon"),
+    layoutButtons: Array.from(document.querySelectorAll(".layout-option")),
     toggleLibraryBtn: $("#toggleLibraryBtn"),
     toggleToolsBtn: $("#toggleToolsBtn"),
     focusModeBtn: $("#focusModeBtn"),
@@ -85,10 +91,15 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     toc: [],
     annotations: [],
     pendingSelection: null,
+    annotationHideTimer: 0,
     selectedAnnotationColor: DEFAULT_ANNOTATION_COLOR,
     renderToken: 0,
     scrollFrame: 0,
+    scrollEdgeIntent: 0,
+    scrollEdgeDirection: "",
+    chapterAdvanceTimer: 0,
     resizeTimer: 0,
+    railResizeTimer: 0,
     libraryFrame: 0,
     progressTimer: 0,
     pendingProgress: null,
@@ -96,10 +107,13 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     turnDirection: "",
     navigationPending: false,
     pointerStart: null,
+    scrollPullStart: null,
     focusMode: false,
     railsBeforeFocus: null,
     preserveRailsOnCompactResize: false,
     focusRestoreTimer: 0,
+    focusTransitionTimer: 0,
+    isFocusTransitioning: false,
     compactViewport: window.matchMedia("(max-width: 760px)").matches,
     pagedMetrics: { pagesPerSpread: 1, pageWidth: 0, pageGap: 0, columnGap: 0, spreadStep: 0 },
     indexToken: 0,
@@ -524,6 +538,10 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       viewport.innerHTML = "";
       const article = document.createElement("article");
       article.className = "book-content epub-content";
+      // EPUB styles frequently force a white chapter canvas. Keep the root
+      // surface under the reader theme while retaining the book's structure.
+      article.style.setProperty("color", "var(--paper-text)", "important");
+      article.style.setProperty("background-color", "var(--paper)", "important");
       for (const className of Array.from(doc.body?.classList || [])) {
         article.classList.add(className);
       }
@@ -990,16 +1008,23 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       console.error(error);
       showToast("书库初始化失败，仍可临时打开文件。");
     }
+
+    document.body.classList.add("app-ready");
   }
 
   function bindEvents() {
     els.importBooksBtn.addEventListener("click", handleImportRequest);
     els.bookInput.addEventListener("change", handleFileImport);
-    els.themeSelect.addEventListener("change", () => applyTheme(els.themeSelect.value));
-    els.layoutSelect.addEventListener("change", async () => {
-      applyLayout(els.layoutSelect.value);
-      if (state.adapter) await renderCurrent();
-    });
+    els.brandMark.addEventListener("click", cycleThemeStyle);
+    els.themeModeBtn.addEventListener("click", (event) => toggleThemeMode(event.currentTarget));
+    els.focusThemeModeBtn.addEventListener("click", (event) => toggleThemeMode(event.currentTarget));
+    for (const button of els.layoutButtons) {
+      button.addEventListener("click", async () => {
+        if (button.disabled || button.dataset.layout === state.layoutMode) return;
+        applyLayout(button.dataset.layout);
+        if (state.adapter) await renderCurrent();
+      });
+    }
     els.toggleLibraryBtn.addEventListener("click", () => toggleRail("left"));
     els.toggleToolsBtn.addEventListener("click", () => toggleRail("right"));
     els.focusModeBtn.addEventListener("click", () => toggleFocusMode());
@@ -1011,6 +1036,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     els.searchForm.addEventListener("submit", handleSearch);
     els.rebuildIndexBtn.addEventListener("click", () => rebuildSearchIndex(true));
     els.readerViewport.addEventListener("scroll", handleViewportScroll, { passive: true });
+    els.readerViewport.addEventListener("wheel", handleScrollChapterIntent, { passive: true });
     els.readerViewport.addEventListener("pointerdown", handleReaderPointerDown, { passive: true });
     els.readerViewport.addEventListener("pointerup", handleReaderPointerUp, { passive: true });
     els.readerViewport.addEventListener("pointercancel", clearReaderPointer);
@@ -1225,7 +1251,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     if (!state.adapter || !state.location) return;
     const token = ++state.renderToken;
     setBusy("正在渲染...");
-    hideAnnotationComposer();
+    hideAnnotationComposer(true);
 
     try {
       prepareViewportLayout();
@@ -1567,18 +1593,24 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   async function navigateTo(location) {
     if (!location) return;
+    cancelScrollChapterAdvance();
     state.location = { ...location };
     await renderCurrent();
   }
 
-  async function moveRelative(direction) {
+  async function moveRelative(direction, { enterPreviousAtEnd = false } = {}) {
     if (!state.adapter || !state.location || state.navigationPending) return;
+    cancelScrollChapterAdvance();
     state.navigationPending = true;
     try {
       if (await turnPdfSpread(direction)) return;
       if (turnPaged(direction)) return;
       queuePageTurn(direction);
-      const nextLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
+      const baseLocation = direction === "next" ? state.adapter.next(state.location) : state.adapter.prev(state.location);
+      const nextLocation =
+        enterPreviousAtEnd && direction === "prev" && baseLocation.unit === "chapter"
+          ? { ...baseLocation, ratio: 1, anchor: "" }
+          : baseLocation;
       await navigateTo(nextLocation);
     } finally {
       state.navigationPending = false;
@@ -1668,10 +1700,82 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       updateProgressUi();
       persistProgress();
       updateControls();
+      if (!isReaderAtScrollEdge("next") && !isReaderAtScrollEdge("prev")) cancelScrollChapterAdvance();
     });
   }
 
+  function handleScrollChapterIntent(event) {
+    const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? els.readerViewport.clientHeight : 1;
+    const delta = event.deltaY * multiplier;
+    if (!delta) return;
+    requestScrollChapterMove(delta > 0 ? "next" : "prev", Math.abs(delta), 96);
+  }
+
+  function requestScrollChapterMove(direction, delta, threshold) {
+    if (!canScrollChapterMove(direction)) {
+      cancelScrollChapterAdvance();
+      return;
+    }
+
+    if (!isReaderAtScrollEdge(direction)) {
+      cancelScrollChapterAdvance();
+      return;
+    }
+
+    if (state.scrollEdgeDirection && state.scrollEdgeDirection !== direction) cancelScrollChapterAdvance();
+    state.scrollEdgeDirection = direction;
+    state.scrollEdgeIntent = Math.min(threshold, state.scrollEdgeIntent + Math.max(0, delta));
+    if (state.scrollEdgeIntent < threshold) return;
+
+    cancelScrollChapterAdvance();
+    playScrollChapterAdvance(direction);
+    moveRelative(direction, { enterPreviousAtEnd: direction === "prev" }).catch((error) =>
+      console.error("Unable to move between chapters.", error),
+    );
+  }
+
+  function canScrollChapterMove(direction) {
+    const atBoundary = state.adapter && state.location
+      ? direction === "next"
+        ? state.adapter.isAtEnd(state.location)
+        : state.adapter.isAtStart(state.location)
+      : true;
+    return Boolean(
+      state.focusMode &&
+        state.layoutMode === "scroll" &&
+        state.adapter &&
+        state.location?.unit === "chapter" &&
+        !atBoundary &&
+        !state.navigationPending &&
+        window.getSelection()?.isCollapsed &&
+        els.annotationComposer.hidden,
+    );
+  }
+
+  function cancelScrollChapterAdvance() {
+    state.scrollEdgeIntent = 0;
+    state.scrollEdgeDirection = "";
+  }
+
+  function isReaderAtScrollEdge(direction) {
+    const maxScroll = els.readerViewport.scrollHeight - els.readerViewport.clientHeight;
+    if (maxScroll < 24) return true;
+    return direction === "next" ? els.readerViewport.scrollTop >= maxScroll - 4 : els.readerViewport.scrollTop <= 4;
+  }
+
+  function playScrollChapterAdvance(direction) {
+    window.clearTimeout(state.chapterAdvanceTimer);
+    els.readerViewport.classList.remove("is-chapter-advancing", "is-chapter-advancing-next", "is-chapter-advancing-prev");
+    void els.readerViewport.offsetWidth;
+    els.readerViewport.classList.add("is-chapter-advancing", `is-chapter-advancing-${direction}`);
+    state.chapterAdvanceTimer = window.setTimeout(() => {
+      els.readerViewport.classList.remove("is-chapter-advancing", "is-chapter-advancing-next", "is-chapter-advancing-prev");
+      state.chapterAdvanceTimer = 0;
+    }, 460);
+  }
+
   function handleResize(delay = 160) {
+    if (state.isFocusTransitioning) delay = Math.max(delay, 360);
     const compactViewport = window.matchMedia("(max-width: 760px)").matches;
     if (compactViewport && !state.compactViewport) {
       if (state.preserveRailsOnCompactResize) {
@@ -1696,8 +1800,17 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function handleReaderPointerDown(event) {
-    if (!isPagedMode() || event.pointerType !== "touch") return;
+    if (event.pointerType !== "touch") return;
     if (event.target.closest("a, button, input, textarea, select")) return;
+    if (!isPagedMode()) {
+      state.scrollPullStart = {
+        id: event.pointerId,
+        y: event.clientY,
+        atTop: isReaderAtScrollEdge("prev"),
+        atBottom: isReaderAtScrollEdge("next"),
+      };
+      return;
+    }
     state.pointerStart = {
       id: event.pointerId,
       x: event.clientX,
@@ -1708,8 +1821,19 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   function handleReaderPointerUp(event) {
     const start = state.pointerStart;
+    const scrollStart = state.scrollPullStart;
     clearReaderPointer();
-    if (!start || start.id !== event.pointerId || !isPagedMode()) return;
+    if (!isPagedMode()) {
+      if (!scrollStart || scrollStart.id !== event.pointerId) return;
+      if (!window.getSelection()?.isCollapsed) return;
+      const delta = scrollStart.y - event.clientY;
+      if (!delta) return;
+      const direction = delta > 0 ? "next" : "prev";
+      if ((direction === "next" && !scrollStart.atBottom) || (direction === "prev" && !scrollStart.atTop)) return;
+      requestScrollChapterMove(direction, Math.abs(delta), 42);
+      return;
+    }
+    if (!start || start.id !== event.pointerId) return;
     if (!window.getSelection()?.isCollapsed) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
@@ -1720,6 +1844,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   function clearReaderPointer() {
     state.pointerStart = null;
+    state.scrollPullStart = null;
   }
 
   function handleKeys(event) {
@@ -1822,6 +1947,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     const location = explicitLocation ? { ...explicitLocation } : { ...state.location };
     if (location.unit === "chapter") location.ratio = readReaderRatio();
 
+    window.clearTimeout(state.annotationHideTimer);
+    state.annotationHideTimer = 0;
+
     state.pendingSelection = {
       bookId: state.activeBookRecord.id,
       quote,
@@ -1830,7 +1958,9 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
     els.annotationQuote.textContent = quote;
     els.annotationNote.value = "";
+    els.annotationComposer.classList.remove("is-visible", "is-leaving");
     els.annotationComposer.hidden = false;
+    void els.annotationComposer.offsetWidth;
     els.annotationComposer.classList.add("is-visible");
 
     const width = 320;
@@ -1841,11 +1971,25 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     els.annotationNote.focus({ preventScroll: true });
   }
 
-  function hideAnnotationComposer() {
+  function hideAnnotationComposer(immediate = false) {
     state.pendingSelection = null;
-    els.annotationComposer.hidden = true;
-    els.annotationComposer.classList.remove("is-visible");
+    window.clearTimeout(state.annotationHideTimer);
+    state.annotationHideTimer = 0;
     window.getSelection()?.removeAllRanges();
+
+    if (immediate || els.annotationComposer.hidden) {
+      els.annotationComposer.hidden = true;
+      els.annotationComposer.classList.remove("is-visible", "is-leaving");
+      return;
+    }
+
+    els.annotationComposer.classList.remove("is-visible");
+    els.annotationComposer.classList.add("is-leaving");
+    state.annotationHideTimer = window.setTimeout(() => {
+      els.annotationComposer.hidden = true;
+      els.annotationComposer.classList.remove("is-leaving");
+      state.annotationHideTimer = 0;
+    }, 180);
   }
 
   function savePendingAnnotation(withNote) {
@@ -1995,9 +2139,11 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function updateLayoutControls() {
-    const supports = Boolean(state.adapter && state.adapter.supportsPagination);
-    els.layoutSelect.disabled = !supports;
-    els.layoutSelect.title = supports ? "当前书籍支持分页版式" : "当前格式使用固定版式";
+    const supports = !state.adapter || Boolean(state.adapter.supportsPagination);
+    for (const button of els.layoutButtons) {
+      button.disabled = !supports;
+      button.title = supports ? (button.dataset.layout === "scroll" ? "连续滚动阅读" : "分页阅读") : "当前格式使用固定版式";
+    }
   }
 
   function syncActiveToc() {
@@ -2135,18 +2281,135 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     Promise.resolve(adapter.destroy()).catch((error) => console.warn("Unable to release reader resources.", error));
   }
 
-  function applyTheme(theme) {
+  function applyTheme(theme, { animate = true, revealFrom = null, modeIconSource = null } = {}) {
+    const { style, mode, key: nextTheme } = getThemeParts(theme);
+    const previousTheme = document.body.dataset.theme;
+    const commitTheme = () => {
+      if (!animate) {
+        window.clearTimeout(applyTheme.timer);
+        document.body.classList.remove("is-theme-switching");
+      }
+      document.body.dataset.theme = nextTheme;
+      document.body.dataset.themeStyle = style;
+      document.body.dataset.colorMode = mode;
+      els.brandMark.textContent = style.toUpperCase();
+      if (els.emptyStateMark) els.emptyStateMark.textContent = style.toUpperCase();
+      syncThemeStyleToggle(style);
+      syncThemeModeToggle(els.themeModeBtn, els.themeModeIcon, mode);
+      syncThemeModeToggle(els.focusThemeModeBtn, els.focusThemeModeIcon, mode);
+      localStorage.setItem(THEME_KEY, nextTheme);
+
+      if (animate && previousTheme && previousTheme !== nextTheme) {
+        document.body.classList.remove("is-theme-switching");
+        void document.body.offsetWidth;
+        document.body.classList.add("is-theme-switching");
+        window.clearTimeout(applyTheme.timer);
+        applyTheme.timer = window.setTimeout(() => document.body.classList.remove("is-theme-switching"), 430);
+      }
+    };
+
+    const canReveal = Boolean(
+      revealFrom &&
+        previousTheme &&
+        previousTheme !== nextTheme &&
+        typeof document.startViewTransition === "function" &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    );
+    if (!canReveal) {
+      commitTheme();
+      return;
+    }
+
+    const rect = revealFrom.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    document.documentElement.style.setProperty("--theme-reveal-x", `${x}px`);
+    document.documentElement.style.setProperty("--theme-reveal-y", `${y}px`);
+    document.documentElement.style.setProperty("--theme-reveal-radius", `${radius}px`);
+    if (modeIconSource) {
+      modeIconSource.style.setProperty("view-transition-name", "theme-mode-icon");
+      document.documentElement.classList.add(`is-theme-mode-to-${mode}`);
+    }
+
+    const clearRevealState = () => {
+      document.documentElement.style.removeProperty("--theme-reveal-x");
+      document.documentElement.style.removeProperty("--theme-reveal-y");
+      document.documentElement.style.removeProperty("--theme-reveal-radius");
+      modeIconSource?.style.removeProperty("view-transition-name");
+      document.documentElement.classList.remove("is-theme-mode-to-light", "is-theme-mode-to-dark");
+    };
+
+    try {
+      const transition = document.startViewTransition(commitTheme);
+      transition.finished
+        .finally(clearRevealState)
+        .catch(() => {});
+    } catch (_) {
+      clearRevealState();
+      commitTheme();
+    }
+  }
+
+  function getThemeParts(theme) {
     const migratedTheme = LEGACY_THEMES[theme] || theme;
-    const nextTheme = THEMES.has(migratedTheme) ? migratedTheme : "p5-dark";
-    document.body.dataset.theme = nextTheme;
-    els.themeSelect.value = nextTheme;
-    els.brandMark.textContent = nextTheme.slice(0, 2).toUpperCase();
-    localStorage.setItem(THEME_KEY, nextTheme);
+    const [rawStyle, rawMode] = String(migratedTheme || "").split("-");
+    const style = THEME_STYLES.has(rawStyle) ? rawStyle : "p5";
+    const currentMode = document.body.dataset.colorMode;
+    const mode = THEME_MODES.has(rawMode)
+      ? rawMode
+      : THEME_MODES.has(currentMode)
+        ? currentMode
+        : "dark";
+    const key = `${style}-${mode}`;
+    return { style, mode, key: THEMES.has(key) ? key : "p5-dark" };
+  }
+
+  function toggleThemeMode(source) {
+    const { style, mode } = getThemeParts(document.body.dataset.theme);
+    const icon = source === els.themeModeBtn ? els.themeModeIcon : els.focusThemeModeIcon;
+    applyTheme(`${style}-${mode === "dark" ? "light" : "dark"}`, {
+      animate: false,
+      revealFrom: source,
+      modeIconSource: icon,
+    });
+  }
+
+  function cycleThemeStyle() {
+    const { style, mode } = getThemeParts(document.body.dataset.theme);
+    const styles = ["p3", "p4", "p5"];
+    const nextStyle = styles[(styles.indexOf(style) + 1) % styles.length];
+    applyTheme(`${nextStyle}-${mode}`);
+  }
+
+  function syncThemeStyleToggle(style) {
+    const styles = ["p3", "p4", "p5"];
+    const currentIndex = styles.indexOf(style);
+    const nextStyle = styles[(currentIndex + 1) % styles.length];
+    const currentLabel = style.toUpperCase();
+    const nextLabel = nextStyle.toUpperCase();
+    els.brandMark.setAttribute("aria-label", `当前 ${currentLabel} 主题，切换至 ${nextLabel} 主题`);
+    els.brandMark.title = `当前 ${currentLabel} · 点击切换至 ${nextLabel}`;
+  }
+
+  function syncThemeModeToggle(button, icon, mode) {
+    if (!button) return;
+    const switchingToLight = mode === "dark";
+    button.dataset.mode = mode;
+    button.setAttribute("aria-pressed", String(mode === "dark"));
+    button.setAttribute("aria-label", switchingToLight ? "切换至明亮模式" : "切换至深夜模式");
+    button.title = switchingToLight ? "切换至明亮模式" : "切换至深夜模式";
+    if (icon) icon.textContent = switchingToLight ? "☾" : "☀";
   }
 
   function applyLayout(layout) {
     state.layoutMode = layout === "paged" ? "paged" : "scroll";
-    els.layoutSelect.value = state.layoutMode;
+    for (const button of els.layoutButtons) {
+      const active = button.dataset.layout === state.layoutMode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+    cancelScrollChapterAdvance();
     localStorage.setItem(LAYOUT_KEY, state.layoutMode);
     document.body.dataset.layout = state.layoutMode;
   }
@@ -2195,9 +2458,21 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   async function setFocusMode(enabled, syncFullscreen) {
     if (enabled === state.focusMode) return;
+    if (!enabled) cancelScrollChapterAdvance();
+    state.isFocusTransitioning = true;
+    window.clearTimeout(state.focusTransitionTimer);
+    state.focusTransitionTimer = window.setTimeout(() => {
+      state.isFocusTransitioning = false;
+      state.focusTransitionTimer = 0;
+    }, 360);
     if (!enabled && syncFullscreen) {
       const changed = await setAppFullscreen(false);
-      if (!changed || !state.focusMode) return;
+      if (!changed || !state.focusMode) {
+        state.isFocusTransitioning = false;
+        window.clearTimeout(state.focusTransitionTimer);
+        state.focusTransitionTimer = 0;
+        return;
+      }
     }
     if (enabled) {
       state.preserveRailsOnCompactResize = false;
@@ -2259,14 +2534,28 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       "compact-rail-open",
       state.compactViewport && (!state.rails.left || !state.rails.right),
     );
-    els.toggleLibraryBtn.classList.toggle("is-active", state.rails.left);
-    els.toggleToolsBtn.classList.toggle("is-active", state.rails.right);
+    const libraryOpen = !state.rails.left;
+    const toolsOpen = !state.rails.right;
+    els.toggleLibraryBtn.classList.toggle("is-active", libraryOpen);
+    els.toggleToolsBtn.classList.toggle("is-active", toolsOpen);
     els.focusModeBtn.classList.toggle("is-active", state.focusMode);
-    els.toggleLibraryBtn.setAttribute("aria-pressed", String(state.rails.left));
-    els.toggleToolsBtn.setAttribute("aria-pressed", String(state.rails.right));
+    els.toggleLibraryBtn.setAttribute("aria-pressed", String(libraryOpen));
+    els.toggleLibraryBtn.setAttribute("aria-label", libraryOpen ? "收起书库" : "展开书库");
+    els.toggleLibraryBtn.title = libraryOpen ? "收起书库" : "展开书库";
+    els.toggleToolsBtn.setAttribute("aria-pressed", String(toolsOpen));
+    els.toggleToolsBtn.setAttribute("aria-label", toolsOpen ? "收起工具栏" : "展开工具栏");
+    els.toggleToolsBtn.title = toolsOpen ? "收起工具栏" : "展开工具栏";
     els.focusModeBtn.setAttribute("aria-pressed", String(state.focusMode));
+    els.focusModeBtn.setAttribute("aria-label", state.focusMode ? "退出沉浸模式" : "进入沉浸模式");
+    els.focusModeBtn.title = state.focusMode ? "退出沉浸模式" : "进入沉浸模式";
     localStorage.setItem(RAILS_KEY, JSON.stringify(state.rails));
-    if (shouldResize && state.adapter) handleResize(280);
+    if (shouldResize && state.adapter) {
+      window.clearTimeout(state.railResizeTimer);
+      state.railResizeTimer = window.setTimeout(() => {
+        state.railResizeTimer = 0;
+        handleResize(0);
+      }, 340);
+    }
   }
 
   function loadRailState() {

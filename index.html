@@ -10,8 +10,8 @@
   <body data-theme="p5-dark">
     <div class="app-shell">
       <header class="topbar">
-        <div class="brand-block" aria-label="P5Reader">
-          <div class="brand-mark">P5</div>
+        <div class="brand-block">
+          <button id="themeStyleBtn" class="brand-mark" type="button" aria-label="当前 P5 主题，切换主题风格" title="切换主题风格">P5</button>
           <div>
             <h1>P5Reader</h1>
             <p>EPUB / TXT / PDF</p>
@@ -33,31 +33,24 @@
             accept=".epub,.txt,.pdf,application/epub+zip,text/plain,application/pdf"
           />
 
-          <label class="theme-picker">
-            <span>主题</span>
-            <select id="themeSelect" aria-label="主题">
-              <optgroup label="Persona 3">
-                <option value="p3-light">P3 · 明</option>
-                <option value="p3-dark">P3 · 暗</option>
-              </optgroup>
-              <optgroup label="Persona 4">
-                <option value="p4-light">P4 · 明</option>
-                <option value="p4-dark">P4 · 暗</option>
-              </optgroup>
-              <optgroup label="Persona 5">
-                <option value="p5-light">P5 · 明</option>
-                <option value="p5-dark" selected>P5 · 暗</option>
-              </optgroup>
-            </select>
-          </label>
+          <button
+            id="themeModeBtn"
+            class="theme-mode-button"
+            type="button"
+            aria-pressed="true"
+            aria-label="切换至明亮模式"
+            title="切换至明亮模式"
+          >
+            <span id="themeModeIcon" class="theme-mode-icon" aria-hidden="true">☀</span>
+          </button>
 
-          <label class="theme-picker">
-            <span>版式</span>
-            <select id="layoutSelect" aria-label="版式">
-              <option value="scroll">Scroll</option>
-              <option value="paged">Paged</option>
-            </select>
-          </label>
+          <div class="layout-picker" role="group" aria-label="阅读版式">
+            <span class="control-label">版式</span>
+            <div class="layout-segments">
+              <button class="layout-option" type="button" data-layout="scroll" aria-pressed="true" title="连续滚动阅读">滚动</button>
+              <button class="layout-option" type="button" data-layout="paged" aria-pressed="false" title="分页阅读">分页</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -94,6 +87,16 @@
               <button id="toggleToolsBtn" class="icon-button" type="button" aria-label="收起或展开工具栏" title="工具">
                 <span aria-hidden="true">&#8981;</span>
               </button>
+              <button
+                id="focusThemeModeBtn"
+                class="icon-button focus-theme-mode"
+                type="button"
+                aria-pressed="true"
+                aria-label="切换至明亮模式"
+                title="切换至明亮模式"
+              >
+                <span id="focusThemeModeIcon" class="theme-mode-icon" aria-hidden="true">☀</span>
+              </button>
               <button id="zoomOutBtn" class="icon-button" type="button" aria-label="缩小" title="缩小">
                 <span aria-hidden="true">&minus;</span>
               </button>
@@ -119,8 +122,11 @@
 
           <div id="readerViewport" class="reader-viewport" tabindex="0">
             <div class="empty-state">
-              <strong>选择一本书开始阅读</strong>
-              <span>导入 EPUB、TXT 或 PDF 后会进入统一阅读页。</span>
+              <div class="empty-state-mark" aria-hidden="true"><span>P5</span></div>
+              <div class="empty-state-copy">
+                <strong>从一本书开始</strong>
+                <span>将 EPUB、TXT 或 PDF 放进你的阅读桌。</span>
+              </div>
             </div>
           </div>
 

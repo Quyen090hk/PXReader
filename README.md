@@ -1,88 +1,114 @@
 # P5Reader
 
-一个女神异闻录 5 风格的浏览器端阅读器原型，已完成第一阶段能力：
+P5Reader 是一款面向本地电子书的桌面阅读器，支持 EPUB、TXT 与 PDF。项目以沉浸、专注和可持续阅读为设计目标：书籍留在本地，阅读进度、标注与书库状态由应用在设备端维护。
 
-- 导入并打开 EPUB、TXT、PDF
-- 统一 Reader 页面
-- IndexedDB 保存导入书籍
-- localStorage 记录阅读进度
-- 目录导航
-- 正文搜索
-- Persona 3 / 4 / 5 风格主题切换，每套均提供明暗配色
-- 选中文字添加高亮和笔记
-- PDF text layer，可选择 PDF 文本并标注
-- EPUB 内部 CSS 读取、资源 URL 重写和分页模式
-- Web Worker 全文索引
-- Tauri v2 桌面化项目骨架
-- 桌面端原生导入默认打开 `文档/P5Reader/Books`，导入后先加入书架
+应用提供 Persona 3、Persona 4 与 Persona 5 三组明暗主题，同时保持阅读正文、目录、全文检索与笔记工具的一致操作方式。
 
-## 运行
+## 功能概览
 
-建议在项目目录启动一个静态服务。Web Worker 在 `file://` 下通常不可用：
+- 导入并阅读 EPUB、TXT、PDF 文件
+- 本地书库：使用 IndexedDB 保存已导入书籍
+- 阅读进度：为每本书独立记录当前阅读位置
+- 目录导航：TXT 自动分章，EPUB 使用内部目录，PDF 支持逐页定位
+- 全文检索：通过 Web Worker 在后台构建索引，减少对阅读操作的干扰
+- 高亮与笔记：选中正文即可添加高亮或笔记，并可回到原始位置
+- 阅读版式：支持滚动与分页阅读；EPUB / TXT 可调整字号缩放
+- 沉浸模式：隐藏系统外的界面干扰，专注于书页
+- 离线可用：EPUB 解包、PDF 渲染与文本解码均在本地完成
+
+## 文件支持
+
+| 格式 | 阅读能力 |
+| --- | --- |
+| EPUB | 目录解析、资源路径重写、内部链接跳转、滚动 / 分页阅读、全文检索、标注 |
+| TXT | UTF-8、GB18030、Big5 编码尝试识别、自动分章、滚动阅读、全文检索、标注 |
+| PDF | Canvas 渲染、可选择文本层、逐页阅读、全文检索、标注 |
+
+## 界面与操作
+
+主界面由书库、阅读区与工具区组成。侧栏可按需收起，阅读区始终保持最大的可用空间。
+
+- 点击“导入”添加一本或多本本地书籍
+- 使用左右方向键切换章节或页面
+- 使用上下方向键或 Page Up / Page Down 滚动正文
+- `Ctrl` + `+` / `-` 调整字号，`Ctrl` + `0` 重置字号
+- `F` 或 `F11` 切换沉浸模式，`Esc` 退出
+- 在正文中选中文字即可打开高亮与笔记面板
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 22.13 或更高版本
+- npm 10 或更高版本
+
+### Web 预览
 
 ```powershell
-python -m http.server 5173
+npm ci
+npm run serve
 ```
 
-然后访问：
+然后在浏览器打开 [http://localhost:5173](http://localhost:5173)。
+
+> 不建议直接以 `file://` 打开 `index.html`，因为全文检索依赖 Web Worker。
+
+### 质量检查
+
+```powershell
+npm run check
+```
+
+该命令会检查前端模块语法并重新构建可分发的 Web 资源。
+
+## 桌面应用
+
+P5Reader 使用 Tauri v2 提供桌面打包能力。开始之前，请安装 Rust 工具链与对应平台的 Tauri 前置依赖。
+
+```powershell
+npm ci
+npm run tauri:dev
+```
+
+构建安装包：
+
+```powershell
+npm run tauri:build
+```
+
+构建过程会先执行 `npm run build:web`，将应用资源输出到 `dist/`，再由 Tauri 生成桌面产物。Windows 默认目标为 NSIS 安装包。
+
+## 项目结构
 
 ```text
-http://localhost:5173
+.
+├── src/
+│   ├── app.js              # 阅读器状态、格式适配器与交互逻辑
+│   ├── search-worker.js    # 后台全文索引与搜索
+│   └── styles.css          # 主题、响应式布局与阅读界面
+├── src-tauri/              # Tauri v2 桌面端配置与 Rust 入口
+├── scripts/
+│   ├── build-static.mjs    # Web 静态资源构建
+│   └── serve-static.cjs    # 本地静态预览服务
+└── index.html              # 应用页面入口
 ```
 
-EPUB 解析使用打包后的本地 JSZip，PDF 渲染使用本地 PDF.js，桌面版断网也可完整阅读。TXT 会在本地尝试 UTF-8、GB18030、Big5 编码。
+## 本地数据
 
-如果安装 npm 依赖，也可以用：
+导入的书籍保存在浏览器或 WebView 的 IndexedDB 中；阅读进度、主题、版式、缩放比例和标注保存在本地存储中。应用不会将书籍内容上传到远程服务。
 
-```powershell
-npm.cmd run serve
-```
+如需清除本地书库或阅读数据，请通过浏览器开发者工具或系统 WebView 数据管理功能操作。清除前请确认已备份需要保留的书籍与笔记。
 
-质量检查：
+## 开发说明
 
-```powershell
-npm.cmd run check
-```
-
-## 桌面版
-
-项目已补 Tauri v2 骨架：
-
-```powershell
-npm install
-npm.cmd run tauri:dev
-```
-
-打包：
-
-```powershell
-npm.cmd run tauri:build
-```
-
-Tauri 会先执行 `npm.cmd run build:web`，把 `index.html` 和 `src/` 复制到 `dist/`，再由 Rust 侧打包。
-Windows 打包目标当前收窄为 NSIS，优先生成 `-setup.exe`，避免首次构建就要求 MSI/VBSCRIPT。
-
-如果当前 PowerShell 找不到 `cargo`，但 Rust 已安装在用户目录，可以先临时补 PATH：
-
-```powershell
-$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
-```
-
-当前 Windows 构建产物：
-
-```text
-src-tauri/target/release/p5reader.exe
-src-tauri/target/release/bundle/nsis/P5Reader_0.1.0_x64-setup.exe
-```
-
-## 架构
-
-核心逻辑位于 `src/app.js`：
+核心阅读逻辑位于 `src/app.js`，通过统一适配器接口处理不同格式：
 
 - `TxtAdapter`
 - `EpubAdapter`
 - `PdfAdapter`
 
-三种格式都暴露统一能力：`load`、`render`、`getToc`、`search`、`getIndexUnits`、`next`、`prev`、`getPercentage`。上层 Reader 只处理当前位置、进度、目录、搜索结果和注释模型。
+适配器负责文件加载、内容渲染、目录、搜索单元、进度定位和前后导航；界面层仅维护当前书籍、阅读位置、搜索结果与标注状态。该结构让新增格式或调整阅读视图时能够保持边界清晰。
 
-全文索引位于 `src/search-worker.js`，使用 Worker 维护倒排索引，并在主线程不可用时回退到适配器直接扫描。
+## 许可
+
+本仓库当前未附带许可证文件。使用、修改或分发前，请先取得项目作者的明确授权。
