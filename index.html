@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="src/styles.css" />
     <script type="module" src="src/app.js"></script>
   </head>
-  <body data-theme="p5">
+  <body data-theme="p5-dark">
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-block" aria-label="P5Reader">
@@ -36,10 +36,18 @@
           <label class="theme-picker">
             <span>主题</span>
             <select id="themeSelect" aria-label="主题">
-              <option value="p5">Phantom</option>
-              <option value="light">Light</option>
-              <option value="night">Night</option>
-              <option value="sepia">Sepia</option>
+              <optgroup label="Persona 3">
+                <option value="p3-light">P3 · 明</option>
+                <option value="p3-dark">P3 · 暗</option>
+              </optgroup>
+              <optgroup label="Persona 4">
+                <option value="p4-light">P4 · 明</option>
+                <option value="p4-dark">P4 · 暗</option>
+              </optgroup>
+              <optgroup label="Persona 5">
+                <option value="p5-light">P5 · 明</option>
+                <option value="p5-dark" selected>P5 · 暗</option>
+              </optgroup>
             </select>
           </label>
 
@@ -86,9 +94,6 @@
               <button id="toggleToolsBtn" class="icon-button" type="button" aria-label="收起或展开工具栏" title="工具">
                 <span aria-hidden="true">&#8981;</span>
               </button>
-              <button id="focusModeBtn" class="icon-button" type="button" aria-label="全屏专注阅读模式" title="全屏专注">
-                <span aria-hidden="true">&#9633;</span>
-              </button>
               <button id="zoomOutBtn" class="icon-button" type="button" aria-label="缩小" title="缩小">
                 <span aria-hidden="true">&minus;</span>
               </button>
@@ -120,8 +125,13 @@
           </div>
 
           <footer class="reader-footer">
-            <span id="progressLabel">0%</span>
-            <span id="locationLabel">尚未打开书籍</span>
+            <div class="reader-status">
+              <span id="progressLabel">0%</span>
+              <span id="locationLabel">尚未打开书籍</span>
+            </div>
+            <button id="focusModeBtn" class="icon-button footer-focus" type="button" aria-label="全屏沉浸式阅读" title="全屏沉浸式阅读">
+              <span aria-hidden="true">&#9633;</span>
+            </button>
           </footer>
         </section>
 

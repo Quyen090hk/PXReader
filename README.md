@@ -8,7 +8,7 @@
 - localStorage 记录阅读进度
 - 目录导航
 - 正文搜索
-- Phantom / Light / Night / Sepia 主题切换
+- Persona 3 / 4 / 5 风格主题切换，每套均提供明暗配色
 - 选中文字添加高亮和笔记
 - PDF text layer，可选择 PDF 文本并标注
 - EPUB 内部 CSS 读取、资源 URL 重写和分页模式

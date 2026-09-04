@@ -19,6 +19,13 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   const LAYOUT_KEY = "p5reader:layout";
   const ZOOM_KEY = "p5reader:zoom";
   const RAILS_KEY = "p5reader:rails";
+  const THEMES = new Set(["p3-light", "p3-dark", "p4-light", "p4-dark", "p5-light", "p5-dark"]);
+  const LEGACY_THEMES = {
+    p5: "p5-dark",
+    light: "p5-light",
+    night: "p3-dark",
+    sepia: "p4-light",
+  };
   const SUPPORTED_TYPES = new Set(["epub", "txt", "pdf"]);
   const ANNOTATION_COLORS = ["#ffd84a", "#7bdff2", "#b2f7a4", "#ff9eb5"];
   const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS[0];
@@ -28,6 +35,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   const els = {
     importBooksBtn: $("#importBooksBtn"),
     bookInput: $("#bookInput"),
+    brandMark: $(".brand-mark"),
     themeSelect: $("#themeSelect"),
     layoutSelect: $("#layoutSelect"),
     toggleLibraryBtn: $("#toggleLibraryBtn"),
@@ -521,6 +529,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
       }
       article.dataset.chapterIndex = String(index);
       article.innerHTML = doc.body ? doc.body.innerHTML : doc.documentElement.innerHTML;
+      if (isLikelyProseChapter(article)) article.classList.add("is-prose-chapter");
 
       if (scopedStyles) {
         const style = document.createElement("style");
@@ -963,7 +972,7 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   async function init() {
-    applyTheme(localStorage.getItem(THEME_KEY) || "p5");
+    applyTheme(localStorage.getItem(THEME_KEY) || "p5-dark");
     applyLayout(state.layoutMode);
     applyZoom(state.zoom, false);
     if (state.compactViewport) state.rails = { left: true, right: true };
@@ -1327,18 +1336,18 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
 
   function calculateColumnPagedMetrics() {
     const viewportWidth = Math.max(360, els.readerViewport.clientWidth);
-    const viewportHeight = Math.max(420, els.readerViewport.clientHeight);
+    const viewportHeight = Math.max(280, els.readerViewport.clientHeight);
     const pagesPerSpread = viewportWidth >= 840 ? 2 : 1;
     const viewportInsetX = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.035), 24, 44) : 20;
-    const viewportInsetY = clamp(Math.round(viewportHeight * 0.035), 18, 30);
+    const viewportInsetY = clamp(Math.round(viewportHeight * 0.035), 14, 30);
     const pageGap = pagesPerSpread === 2 ? clamp(Math.round(viewportWidth * 0.018), 18, 28) : 0;
     const availableWidth = Math.max(320, viewportWidth - viewportInsetX * 2);
     const pageOuterWidth = Math.floor((availableWidth - pageGap * (pagesPerSpread - 1)) / pagesPerSpread);
-    const pageHeight = Math.max(360, viewportHeight - viewportInsetY * 2);
+    const pageHeight = Math.max(240, viewportHeight - viewportInsetY * 2);
     const pageInnerX = clamp(Math.round(pageOuterWidth * 0.08), 30, 54);
-    const pageInnerY = clamp(Math.round(pageHeight * 0.075), 28, 50);
+    const pageInnerY = clamp(Math.round(pageHeight * 0.075), 18, 50);
     const pageWidth = Math.max(220, pageOuterWidth - pageInnerX * 2);
-    const contentHeight = Math.max(280, pageHeight - pageInnerY * 2);
+    const contentHeight = Math.max(180, pageHeight - pageInnerY * 2);
     const columnGap = pageGap + pageInnerX * 2;
     const spreadWidth = pageOuterWidth * pagesPerSpread + pageGap * (pagesPerSpread - 1);
     const spreadStep = pagesPerSpread * (pageWidth + columnGap);
@@ -1745,14 +1754,48 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
     if (event.key === "Escape") {
       hideAnnotationComposer();
     }
-    if (event.key === "ArrowRight" || event.key === "PageDown") {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      if (isPagedMode()) {
+        moveRelative(direction > 0 ? "next" : "prev");
+      } else {
+        scrollReaderBy(direction * getKeyboardScrollStep(false));
+      }
+      return;
+    }
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      event.preventDefault();
+      const direction = event.key === "PageDown" ? 1 : -1;
+      if (isPagedMode()) {
+        moveRelative(direction > 0 ? "next" : "prev");
+      } else {
+        scrollReaderBy(direction * getKeyboardScrollStep(true));
+      }
+      return;
+    }
+    if (event.key === "ArrowRight") {
       event.preventDefault();
       moveRelative("next");
+      return;
     }
-    if (event.key === "ArrowLeft" || event.key === "PageUp") {
+    if (event.key === "ArrowLeft") {
       event.preventDefault();
       moveRelative("prev");
     }
+  }
+
+  function getKeyboardScrollStep(byPage) {
+    if (byPage) return Math.max(120, els.readerViewport.clientHeight * 0.85);
+    return clamp(els.readerViewport.clientHeight * 0.12, 48, 84);
+  }
+
+  function scrollReaderBy(distance) {
+    const max = Math.max(0, els.readerViewport.scrollHeight - els.readerViewport.clientHeight);
+    els.readerViewport.scrollTo({
+      top: clamp(els.readerViewport.scrollTop + distance, 0, max),
+      behavior: "instant",
+    });
   }
 
   function handleReaderSelection() {
@@ -2093,9 +2136,12 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   function applyTheme(theme) {
-    document.body.dataset.theme = theme;
-    els.themeSelect.value = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    const migratedTheme = LEGACY_THEMES[theme] || theme;
+    const nextTheme = THEMES.has(migratedTheme) ? migratedTheme : "p5-dark";
+    document.body.dataset.theme = nextTheme;
+    els.themeSelect.value = nextTheme;
+    els.brandMark.textContent = nextTheme.slice(0, 2).toUpperCase();
+    localStorage.setItem(THEME_KEY, nextTheme);
   }
 
   function applyLayout(layout) {
@@ -2132,7 +2178,6 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
   }
 
   async function toggleRail(side) {
-    if (state.focusMode) await setFocusMode(false, true);
     if (side === "left") {
       state.rails.left = !state.rails.left;
       if (state.compactViewport && !state.rails.left) state.rails.right = true;
@@ -2414,6 +2459,17 @@ const PDF_WORKER_URL = new URL("../vendor/pdf.worker.min.mjs", import.meta.url).
         if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
       }
     }
+  }
+
+  function isLikelyProseChapter(article) {
+    const paragraphs = Array.from(article.querySelectorAll("p")).filter(
+      (paragraph) => collapseWhitespace(paragraph.textContent).length >= 12,
+    );
+    if (paragraphs.length < 4) return false;
+    const sampleLength = paragraphs
+      .slice(0, 12)
+      .reduce((total, paragraph) => total + collapseWhitespace(paragraph.textContent).length, 0);
+    return sampleLength >= 320;
   }
 
   function scopeCss(css, scope) {

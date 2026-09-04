@@ -1,67 +1,122 @@
 :root {
   color-scheme: dark;
-  --bg: #09090b;
+  --bg: #08090c;
   --surface: #151519;
-  --surface-2: #202027;
-  --paper: #f7f2e9;
-  --paper-text: #19191c;
-  --text: #f8f8f8;
-  --muted: #a8a8b3;
-  --line: #34343c;
+  --surface-2: #242429;
+  --paper: #121216;
+  --paper-text: #f4f1ed;
+  --text: #fafafa;
+  --muted: #aaaab4;
+  --line: #3b3b43;
   --accent: #e50914;
   --accent-2: #ffffff;
+  --accent-ink: #ffffff;
   --warning: #ffd84a;
   --shadow: 10px 10px 0 rgba(0, 0, 0, 0.7);
   --reader-font: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
   --reader-zoom: 1;
 }
 
-[data-theme="light"] {
+[data-theme="p3-light"] {
   color-scheme: light;
-  --bg: #f3f4f6;
-  --surface: #ffffff;
-  --surface-2: #e8ebf0;
-  --paper: #ffffff;
-  --paper-text: #20242c;
-  --text: #17181d;
-  --muted: #68707d;
-  --line: #cfd4dd;
-  --accent: #d71920;
-  --accent-2: #111111;
-  --warning: #a46a00;
-  --shadow: 8px 8px 0 rgba(16, 24, 40, 0.12);
+  --bg: #e6f2f7;
+  --surface: #f8fcfe;
+  --surface-2: #d5e8f1;
+  --paper: #fbfdff;
+  --paper-text: #183149;
+  --text: #10283d;
+  --muted: #58758c;
+  --line: #a4c8d8;
+  --accent: #0b739b;
+  --accent-2: #0e3d59;
+  --accent-ink: #ffffff;
+  --warning: #d8c929;
+  --shadow: 8px 8px 0 rgba(17, 65, 91, 0.16);
 }
 
-[data-theme="night"] {
+[data-theme="p3-dark"] {
   color-scheme: dark;
-  --bg: #06070a;
-  --surface: #11141a;
-  --surface-2: #1a202b;
-  --paper: #10151d;
-  --paper-text: #e7edf7;
-  --text: #edf3ff;
-  --muted: #91a0b8;
-  --line: #2a3444;
-  --accent: #4cc9f0;
-  --accent-2: #ffffff;
-  --warning: #f2c94c;
-  --shadow: 8px 8px 0 rgba(0, 0, 0, 0.5);
+  --bg: #071121;
+  --surface: #0e1c35;
+  --surface-2: #172c50;
+  --paper: #0b1930;
+  --paper-text: #e9f5ff;
+  --text: #f4faff;
+  --muted: #91b0d0;
+  --line: #2a4e76;
+  --accent: #49c7e9;
+  --accent-2: #dffaff;
+  --accent-ink: #062136;
+  --warning: #f1e46a;
+  --shadow: 9px 9px 0 rgba(0, 5, 18, 0.58);
 }
 
-[data-theme="sepia"] {
+[data-theme="p4-light"] {
   color-scheme: light;
-  --bg: #efe4d1;
-  --surface: #fff7e9;
-  --surface-2: #ead8b9;
-  --paper: #fffaf0;
-  --paper-text: #302517;
-  --text: #2f2518;
-  --muted: #7d6d58;
-  --line: #d8c39e;
-  --accent: #b62024;
-  --accent-2: #24170f;
-  --warning: #946400;
-  --shadow: 8px 8px 0 rgba(83, 57, 24, 0.18);
+  --bg: #fff4ad;
+  --surface: #fffdf0;
+  --surface-2: #f4df65;
+  --paper: #fffef4;
+  --paper-text: #2a240d;
+  --text: #27210a;
+  --muted: #756620;
+  --line: #d1b629;
+  --accent: #e6c514;
+  --accent-2: #27210a;
+  --accent-ink: #211c08;
+  --warning: #ef7f1a;
+  --shadow: 8px 8px 0 rgba(67, 55, 5, 0.2);
+}
+
+[data-theme="p4-dark"] {
+  color-scheme: dark;
+  --bg: #121007;
+  --surface: #211c0d;
+  --surface-2: #332a10;
+  --paper: #18150b;
+  --paper-text: #fff4af;
+  --text: #fff9d2;
+  --muted: #c6b867;
+  --line: #5d4e16;
+  --accent: #f1d51e;
+  --accent-2: #fff2a0;
+  --accent-ink: #181405;
+  --warning: #ff8d28;
+  --shadow: 9px 9px 0 rgba(0, 0, 0, 0.58);
+}
+
+[data-theme="p5-light"] {
+  color-scheme: light;
+  --bg: #eee9e4;
+  --surface: #fffdfb;
+  --surface-2: #e8e2dd;
+  --paper: #fffdf8;
+  --paper-text: #211d1c;
+  --text: #181516;
+  --muted: #71696a;
+  --line: #c9bfc0;
+  --accent: #cf101a;
+  --accent-2: #181516;
+  --accent-ink: #ffffff;
+  --warning: #d8a719;
+  --shadow: 8px 8px 0 rgba(35, 22, 23, 0.18);
+}
+
+[data-theme="p5-dark"] {
+  color-scheme: dark;
+  --bg: #08090c;
+  --surface: #151519;
+  --surface-2: #242429;
+  --paper: #121216;
+  --paper-text: #f4f1ed;
+  --text: #fafafa;
+  --muted: #aaaab4;
+  --line: #3b3b43;
+  --accent: #e50914;
+  --accent-2: #ffffff;
+  --accent-ink: #ffffff;
+  --warning: #ffd84a;
+  --shadow: 10px 10px 0 rgba(0, 0, 0, 0.7);
 }
 
 * {
@@ -76,14 +131,32 @@ body {
 
 body {
   margin: 0;
-  background:
-    linear-gradient(120deg, transparent 0 70%, rgba(229, 9, 20, 0.12) 70% 100%),
-    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 22px),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--reader-font);
   letter-spacing: 0;
   overflow: hidden;
+}
+
+body[data-theme^="p3"] {
+  background:
+    radial-gradient(circle at 84% 12%, color-mix(in srgb, var(--accent) 18%, transparent) 0 9%, transparent 9.4%),
+    repeating-linear-gradient(145deg, color-mix(in srgb, var(--accent) 7%, transparent) 0 1px, transparent 1px 26px),
+    var(--bg);
+}
+
+body[data-theme^="p4"] {
+  background:
+    linear-gradient(128deg, transparent 0 68%, color-mix(in srgb, var(--accent) 20%, transparent) 68% 78%, transparent 78%),
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent) 0 1px, transparent 1px 24px),
+    var(--bg);
+}
+
+body[data-theme^="p5"] {
+  background:
+    linear-gradient(120deg, transparent 0 70%, color-mix(in srgb, var(--accent) 14%, transparent) 70% 100%),
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--text) 5%, transparent) 0 1px, transparent 1px 22px),
+    var(--bg);
 }
 
 button,
@@ -127,12 +200,21 @@ button {
   place-items: center;
   width: 58px;
   height: 42px;
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border: 3px solid var(--accent-2);
-  box-shadow: 5px 5px 0 #000000;
+  box-shadow: 5px 5px 0 color-mix(in srgb, var(--text) 88%, #000000);
   clip-path: polygon(0 0, 100% 0, 86% 100%, 8% 86%);
   font-weight: 900;
+}
+
+body[data-theme^="p3"] .brand-mark {
+  clip-path: polygon(8% 0, 100% 10%, 91% 100%, 0 88%);
+}
+
+body[data-theme^="p4"] .brand-mark {
+  clip-path: polygon(5% 5%, 93% 0, 100% 88%, 12% 100%, 0 20%);
+  transform: rotate(-2deg);
 }
 
 .brand-block h1 {
@@ -164,9 +246,9 @@ button {
   min-height: 38px;
   padding: 0 14px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--accent-ink);
   border: 2px solid var(--accent-2);
-  box-shadow: 4px 4px 0 #000000;
+  box-shadow: 4px 4px 0 color-mix(in srgb, var(--text) 88%, #000000);
   clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%);
   cursor: pointer;
 }
@@ -335,7 +417,7 @@ body.rail-right-collapsed .search-rail {
 .toc-item:hover,
 .toc-item.is-active,
 .search-result:hover {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent-2);
 }
@@ -416,6 +498,30 @@ body.rail-right-collapsed .search-rail {
   border-top: 2px solid var(--line);
   color: var(--muted);
   font-size: 13px;
+  min-height: 40px;
+  padding: 5px 8px 5px 14px;
+}
+
+.reader-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reader-status #locationLabel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.icon-button.footer-focus {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 28px;
+  border-width: 1px;
 }
 
 .book-meta {
@@ -461,13 +567,13 @@ body.rail-right-collapsed .search-rail {
 }
 
 .icon-button:not(:disabled):hover {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent-2);
 }
 
 .icon-button.is-active {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent-2);
 }
@@ -676,6 +782,59 @@ body.rail-right-collapsed .search-rail {
   word-break: normal;
 }
 
+/* Long-form chapters should remain readable even when an EPUB ships with
+   cramped, device-specific body styles. Decorative/front-matter pages keep
+   their authored layout because only prose chapters receive this class. */
+.book-content.epub-content.is-prose-chapter {
+  color: var(--paper-text);
+  font-family: var(--reader-font);
+  font-size: calc(18px * var(--reader-zoom));
+  line-height: 1.75;
+}
+
+.book-content.epub-content.is-prose-chapter:not(.is-paginated) {
+  width: min(760px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: clamp(36px, 5vh, 56px) 0 64px;
+}
+
+.book-content.epub-content.is-prose-chapter :where(div, p:not([class]), blockquote, li) {
+  font-family: inherit;
+  line-height: inherit;
+}
+
+.book-content.epub-content.is-prose-chapter p:not([class]) {
+  width: auto;
+  margin: 0 0 0.55em;
+  text-indent: 2em;
+  overflow-wrap: break-word;
+}
+
+.book-content.epub-content.is-prose-chapter > div:first-of-type > .logo:first-child {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 44px;
+  margin: 0 0 1.25em;
+  overflow: hidden;
+  text-indent: 0;
+}
+
+.book-content.epub-content.is-prose-chapter > div:first-of-type > .logo:first-child img {
+  width: auto;
+  max-width: min(32%, 180px);
+  height: 100%;
+  object-fit: contain;
+}
+
+.book-content.epub-content.is-prose-chapter > div:first-of-type > h2:first-of-type {
+  margin: 0 0 1.6em;
+  color: inherit;
+  font-size: 1.35em;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .epub-content table {
   max-width: 100%;
   border-collapse: collapse;
@@ -789,7 +948,7 @@ body.rail-right-collapsed .search-rail {
 }
 
 .pdf-text-layer ::selection {
-  background: rgba(229, 9, 20, 0.28);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 mark.reader-hit {
@@ -833,7 +992,7 @@ mark.annotation-mark {
 }
 
 .index-button:not(:disabled):hover {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent-2);
 }
@@ -855,7 +1014,7 @@ mark.annotation-mark {
 
 .search-box button {
   height: 38px;
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border: 2px solid var(--accent-2);
   border-radius: 6px;
@@ -934,7 +1093,7 @@ mark.annotation-mark {
 }
 
 .annotation-delete:hover {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
 }
 
@@ -1007,7 +1166,7 @@ mark.annotation-mark {
 }
 
 .annotation-actions button:hover {
-  color: #ffffff;
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent-2);
 }
@@ -1206,13 +1365,22 @@ mark.annotation-mark {
   }
 
   .reader-footer {
-    padding: 9px 10px;
+    padding: 5px 8px 5px 10px;
   }
 
   .book-content {
     width: min(100% - 24px, 720px);
     padding-top: 24px;
     font-size: calc(17px * var(--reader-zoom));
+  }
+
+  .book-content.epub-content.is-prose-chapter {
+    font-size: calc(17px * var(--reader-zoom));
+  }
+
+  .book-content.epub-content.is-prose-chapter:not(.is-paginated) {
+    width: min(100% - 32px, 720px);
+    padding: 28px 0 48px;
   }
 
   .rail-backdrop {
@@ -1236,16 +1404,16 @@ body.focus-mode .app-shell {
   min-height: 0;
 }
 
-body.focus-mode .topbar,
-body.focus-mode .side-rail,
-body.focus-mode .search-rail,
-body.focus-mode .rail-backdrop {
+body.focus-mode .topbar {
   display: none;
 }
 
 body.focus-mode .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--left-rail-width, minmax(230px, 280px)) minmax(0, 1fr) var(
+      --right-rail-width,
+      minmax(230px, 300px)
+    );
   grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
@@ -1269,6 +1437,12 @@ body.focus-mode .reader-toolbar {
 
 body.focus-mode .reader-footer {
   border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+@media (max-width: 760px) {
+  body.focus-mode .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
